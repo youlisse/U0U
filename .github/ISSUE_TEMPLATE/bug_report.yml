@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in U0U doesn't work as it should (one bug per issue)
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are for reproducible bugs only: one bug per issue, with the steps to reproduce it.
+  - type: input
+    id: version
+    attributes:
+      label: U0U version
+      description: The release you installed (its name on the Releases page)
+      placeholder: "v0.1"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Computer, OS and browser (if the editor, installer or USB is involved)
+      placeholder: "macOS 15.6, Chrome 140"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: A photo or short video helps.
+    validations:
+      required: true

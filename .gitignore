@@ -1,0 +1,9 @@
+build/
+.DS_Store
+__pycache__/
+*.fwsc
+!site/firmware/*.fwsc
+# Felucca's samples (tools/fetch_cc0.py brings them back; U0U ships none)
+assets/samples-cc0/
+# local screenshot
+/image.png

@@ -1,0 +1,11 @@
+{
+  "what": "A drum machine for the FM-1: 16 steps, 11 synthesized drums, and a step FX engine on the master bus where each effect lands only on the steps you choose. Patterns chain into a song, and it follows your computer's MIDI clock over USB.",
+  "author": "@Y_oulisse",
+  "kinds": [
+    "drums"
+  ],
+  "play": "https://youlisse.github.io/U0U/",
+  "image": "docs/card.png",
+  "color": "#c5f78b",
+  "sounds": "none"
+}
