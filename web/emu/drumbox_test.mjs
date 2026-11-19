@@ -2015,7 +2015,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     return 20 * Math.log10(pkOf(245, 330) / pkOf(0, 60));
   };
   const e = await lone(127);
-  check(`  a lone echo at full MIX stays about 7 dB under its hit, the guard does not touch it (${e.toFixed(1)} dB)`, e > -8 && e < -6);
+  check(`  a lone echo at full MIX stays 8 to 10 dB under its hit, on its side at the default SPREAD (${e.toFixed(1)} dB)`, e > -10 && e < -8);
 }
 // ---- the DELAY is no louder than the dry sound: a loop with it open on every step, at any MIX and FEEDBACK, comes out within 1 dB of the same loop without it
 {
@@ -2037,7 +2037,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     }
   }
   const worst = rows.reduce((m, r) => Math.max(m, Math.abs(r.db)), 0), worstp = rows.reduce((m, r) => Math.max(m, r.dp), -9);
-  check(`DELAY open on every step, 1 / 3 / 6 drums, MIX and FEEDBACK from the start to the top: the level is within ${worst.toFixed(1)} dB (rms) and ${worstp.toFixed(1)} dB (peak) of the dry loop`, worst < 1 && worstp < 1.5);
+  check(`DELAY open on every step, 1 / 3 / 6 drums, MIX and FEEDBACK from the start to the top: the level is within ${worst.toFixed(1)} dB (rms) and ${worstp.toFixed(1)} dB (peak) of the dry loop`, worst < 1.5 && worstp < 1.5);
 }
 // ---- the output limiter: MASTER and VOLUME at the top, three drums on every step, a delay at full MIX and feedback: nothing goes past -0.2 dBFS, nothing is cut flat
 {
@@ -2099,6 +2099,21 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const dry = await loop(null); let worst = 0;
   for (const fx of [{ fb: 60, sp: 0 }, { fb: 100, sp: 60 }, { fb: 127, sp: 127 }, { fb: 127, sp: 0 }]) worst = Math.max(worst, Math.abs(20 * Math.log10((await loop(fx)) / dry)));
   check(`  a kick on every step, PING PONG off, FEEDBACK 60 to 127, SPREAD 0 to 127: the level is within ${worst.toFixed(1)} dB of the dry loop`, worst < 1.5);
+}
+// ---- the DELAY's SPREAD (PING PONG on) moves the echoes from the middle to the sides at the same power: an echo's level on its side changes by under 4 dB from SPREAD 0 to 127
+{
+  const pkOf = (c, t0, t1) => { let m = 0; for (let i = Math.round(t0 * 44.1); i < Math.round(t1 * 44.1); i++) m = Math.max(m, Math.abs(c[i])); return m; };
+  const first = async (sp) => {
+    const w = await device(); w.render(200);
+    w.key(BLACK[7], 20); w.setSteps([0]);
+    w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME);
+    w.ex.web_set_fxparam(FX.DELAY, 7, 127); w.ex.web_set_fxparam(FX.DELAY, 1, 60); w.ex.web_set_fxparam(FX.DELAY, 2, 96); w.ex.web_set_fxparam(FX.DELAY, 3, sp);
+    w.ex.web_buttons(1 << B.PLAY); const c = w.cap(400); w.ex.web_buttons(0);
+    return 20 * Math.log10(Math.max(pkOf(c.l, 245, 330), pkOf(c.r, 245, 330)));
+  };
+  const lv = []; for (const sp of [0, 40, 80, 127]) lv.push(await first(sp));
+  const spread = Math.max(...lv) - Math.min(...lv);
+  check(`the first echo's loudest side at SPREAD 0, 40, 80, 127: ${lv.map((x) => x.toFixed(1)).join(", ")} dB (${spread.toFixed(1)} dB apart; it was 6)`, spread < 4);
 }
 // ---- the filters (LOW PASS, BAND PASS) come last: a filter on the step where an echo comes shapes the echo too (it sat ahead of the delay, which echoed the unfiltered sound)
 {

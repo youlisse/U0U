@@ -445,7 +445,7 @@ static void fx_flanger(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a
 #define DLY_COL 18800                                  /* Felucca's COLR 70: 2000 + 70 * 240, Q15 */
 #define DLY_DRY 80                                     /* how far the dry comes down at the full send: 80 / 256 of the square of the send (Q8) */
 static int16_t dly_buf[2][DLY_LEN] __attribute__((section(".pool")));
-static struct { uint32_t w; int32_t lp[2], dt[2], act; } dly;                 /* (dt: the delay of each line in samples, Q8) */
+static struct { uint32_t w; int32_t lp[2], dt[2], k, c, act; } dly;           /* (dt: the delay of each line in samples, Q8; k, c: SPREAD's width and gain, Q15) */
 
 static inline int32_t dly_read(const int16_t *b, uint32_t w, int32_t dq)   /* the line as it was dq / 256 samples ago (linear interpolation) */
 {
@@ -474,12 +474,19 @@ static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
 {
     const uint8_t *p = dbx_fx.p[FX_DELAY];
     uint32_t i, ch, dl = dbx_beat_samples() * DBX_DTIME_NUM[dbx_opt(p[0], 6u)] / 4u, dr, pong = p[2] >= 64u, pk = 0;
-    int32_t a = a0, da = (a1 - a0) / (int32_t)n, fb = (int32_t)p[1] * 230, f2 = (fb * fb) >> 15, sp = p[3], nf, ae, d, w2, tq[2];
+    int32_t a = a0, da = (a1 - a0) / (int32_t)n, fb = (int32_t)p[1] * 230, f2 = (fb * fb) >> 15, sp = p[3], nf, ae, d, w2, tq[2], kt, ct;
     if (a0 == 0 && a1 == 0 && dly.act < 8)
         return;
     nf = (int32_t)dly_isqrt((uint32_t)(((32768 - f2) * (32768 - fb)) >> 15) << 15);     /* sqrt((1 - fb^2) (1 - fb)), Q15 */
     dl = dl < 16u ? 16u : dl > DLY_LEN - 2u - 4096u ? DLY_LEN - 2u - 4096u : dl;
     dr = dl + (pong ? 0u : (uint32_t)(dbx_step_samples() / 2u) * (uint32_t)sp / 127u);          /* off: the right side later */
+    dr = dr > DLY_LEN - 2u ? DLY_LEN - 2u : dr;                                  /* (never past the line: at a slow tempo half a step is more than the room left) */
+    kt = sp * 32768 / 127;                                                       /* SPREAD as a width, 0..1 (Q15), and the gain that keeps the power the same at every width: 1 / sqrt(1 + k^2) */
+    ct = (int32_t)((1u << 30) / dly_isqrt((uint32_t)(32768 + ((kt * kt) >> 15)) << 15));
+    if (dly.c == 0) {
+        dly.k = kt;
+        dly.c = ct;
+    }
     tq[0] = (int32_t)dl << 8;
     tq[1] = (int32_t)dr << 8;
     for (ch = 0; ch < 2u; ch++)
@@ -494,6 +501,8 @@ static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
         }
         xl = dly_read(dly_buf[0], w, dly.dt[0]);
         xr = dly_read(dly_buf[pong ? 1 : 0], w, dly.dt[1]);                              /* (PING PONG off: the right side is a later tap of the left line) */
+        dly.k += (kt - dly.k + (kt >= dly.k ? 255 : -255)) / 256;                        /* SPREAD glides too (a knob's click is a step in the echoes' place) */
+        dly.c += (ct - dly.c + (ct >= dly.c ? 255 : -255)) / 256;
         dly.lp[0] += ((xl - dly.lp[0]) * DLY_COL) >> 15;
         dly.lp[1] += ((xr - dly.lp[1]) * DLY_COL) >> 15;
         ae = ((a >> 4) * nf) >> 15;                                                   /* the send, Q12 */
@@ -501,8 +510,8 @@ static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
         if (pong) {                                                                   /* the input in the left line, each echo into the other */
             wl = (in >> 1) + ((dly.lp[1] * fb) >> 15);
             wr = (dly.lp[0] * fb) >> 15;
-            ol = ((xl + xr) >> 1) + (((xl - xr) >> 1) * sp) / 127;                    /* SPREAD: from the middle to apart */
-            or_ = ((xl + xr) >> 1) - (((xl - xr) >> 1) * sp) / 127;
+            ol = ((((xl + xr) >> 1) + ((((xl - xr) >> 1) * dly.k) >> 15)) * dly.c) >> 15;   /* SPREAD: from the middle to apart, as loud at every width */
+            or_ = ((((xl + xr) >> 1) - ((((xl - xr) >> 1) * dly.k) >> 15)) * dly.c) >> 15;
         } else {
             wl = (((in * 181) >> 8) >> 1) + ((dly.lp[0] * fb) >> 15);                    /* one loop, at the time: the right side is the same echoes, SPREAD later (-3 dB: the
                                                                                           * echoes are on both sides at once, not one side at a time as in PING PONG) */
