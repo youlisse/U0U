@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments (dsp.c, the filters and tables it builds on) */
-/* DrumBox step effects: eleven effects on the master bus, one per black key on the FX page, in the order of the signal
- * (a sound goes through them left to right, the time effects last):
- *   HALFTIME, BITCRUSH, SATURATE 1, LOW PASS, BAND PASS | PAN, FLANGER, DELAY, REPEAT, REVERB, SATURATE 2
- * The first five work on the mono sum of the drums, the others on the stereo that PAN makes of it.
+/* DrumBox step effects: eleven effects on the master bus, one per black key on the FX page. The signal goes through
+ *   HALFTIME, BITCRUSH, SATURATE 1 | PAN, FLANGER, DELAY, REPEAT, REVERB, SATURATE 2 | LOW PASS, BAND PASS
+ * The first three work on the mono sum of the drums, the next six on the stereo that PAN makes of it, and the two filters are last, on the stereo output:
+ * a filter shapes everything that is playing then, the echoes, the tails and what the lanes' pans add to the sound (they sat ahead of the delay: it
+ * echoed what they had not filtered, and the pans' side went round them).
  * Each effect has 16 steps (a pattern's, dbx_seq.fx) and eight parameters: four of its own, then ATTACK, RELEASE,
  * CONTINUOUS (on at every step) and MIX. A step that is on opens the effect: its amount follows a gate through an
  * attack / release envelope, so a run of steps in a row attacks at the first and releases after the last. The amount
@@ -318,46 +319,53 @@ static void fx_sat2(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1) 
 }
 
 /* ------------------------------------------------- LOW PASS, BAND PASS --- */
-static struct { int32_t ic[2][2]; } lpf;
-static int32_t bpf[2];
+static struct { int32_t ic[2][2][2]; } lpf;                 /* the channel, the pole pair, its two states */
+static int32_t bpf[2][2];                                  /* the channel, its two states */
 
-static void fx_lp(int32_t *m, uint32_t n, int32_t a0, int32_t a1)
+static void fx_lp(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
 {
     const uint8_t *p = dbx_fx.p[FX_LP];
-    uint32_t i;
+    uint32_t i, ch;
     int32_t am = (a0 + a1) >> 1, to = (int32_t)p[0] << 8, from = (int32_t)p[2] << 8, cut;
     tsvf_t c;
     if (a0 == 0 && a1 == 0) {
-        lpf.ic[0][0] = lpf.ic[0][1] = lpf.ic[1][0] = lpf.ic[1][1] = 0;
+        for (ch = 0; ch < 2u; ch++)
+            lpf.ic[ch][0][0] = lpf.ic[ch][0][1] = lpf.ic[ch][1][0] = lpf.ic[ch][1][1] = 0;
         return;
     }
     cut = from + ((((to - from) >> 4) * (am >> 4)) >> 8);                         /* the sweep: FROM -> CUTOFF */
     tsvf_coef(&c, cut, p[1]);
-    for (i = 0; i < n; i++) {
-        int32_t y = tsvf_lp(&c, m[i], &lpf.ic[0][0], &lpf.ic[0][1]);
-        if (dbx_opt(p[3], 2u))                                                    /* 24 dB: a second pole pair */
-            y = tsvf_lp(&c, y, &lpf.ic[1][0], &lpf.ic[1][1]);
-        m[i] = dbx_c17(y);
+    for (ch = 0; ch < 2u; ch++) {
+        int32_t *x = ch ? r : l;
+        for (i = 0; i < n; i++) {
+            int32_t y = tsvf_lp(&c, x[i], &lpf.ic[ch][0][0], &lpf.ic[ch][0][1]);
+            if (dbx_opt(p[3], 2u))                                                /* 24 dB: a second pole pair */
+                y = tsvf_lp(&c, y, &lpf.ic[ch][1][0], &lpf.ic[ch][1][1]);
+            x[i] = dbx_c17(y);
+        }
     }
 }
 
-static void fx_bp(int32_t *m, uint32_t n, int32_t a0, int32_t a1)
+static void fx_bp(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
 {
     const uint8_t *p = dbx_fx.p[FX_BP];
-    uint32_t i;
+    uint32_t i, ch;
     int32_t am = (a0 + a1) >> 1, to = (int32_t)p[0] << 8, from = (int32_t)p[2] << 8, cut, k = 600 + (int32_t)(p[1] * p[1] * 6000u / 16129u),
-            a = a0, da = (a1 - a0) / (int32_t)n, g = dbx_gain_q10(p[3]);
+            da = (a1 - a0) / (int32_t)n, g = dbx_gain_q10(p[3]);
     tsvf_t c;
     if (a0 == 0 && a1 == 0) {
-        bpf[0] = bpf[1] = 0;
+        bpf[0][0] = bpf[0][1] = bpf[1][0] = bpf[1][1] = 0;
         return;
     }
     cut = from + ((((to - from) >> 4) * (am >> 4)) >> 8);
     tsvf_coef_k(&c, cut, k);
-    for (i = 0; i < n; i++, a += da) {
-        int32_t x = m[i], y = (dv_bp(&c, x, bpf) * k) >> 12;
-        y = dbx_c17((y * g) >> 10);
-        m[i] = dbx_xfade(x, y, a);
+    for (ch = 0; ch < 2u; ch++) {
+        int32_t *m = ch ? r : l, a = a0;
+        for (i = 0; i < n; i++, a += da) {
+            int32_t x = m[i], y = (dv_bp(&c, x, bpf[ch]) * k) >> 12;
+            y = dbx_c17((y * g) >> 10);
+            m[i] = dbx_xfade(x, y, a);
+        }
     }
 }
 
@@ -692,8 +700,6 @@ static void dbx_fx_process(const int32_t *mix, const int32_t *side, int32_t *l, 
     fx_half(m, n, a0[FX_HALF], a1[FX_HALF]);
     fx_crush(m, n, a0[FX_CRUSH], a1[FX_CRUSH]);
     fx_sat1(m, n, a0[FX_SAT1], a1[FX_SAT1]);
-    fx_lp(m, n, a0[FX_LP], a1[FX_LP]);
-    fx_bp(m, n, a0[FX_BP], a1[FX_BP]);
     if (a0[FX_PAN] == 0 && a1[FX_PAN] == 0)
         for (i = 0; i < n; i++)
             l[i] = r[i] = m[i];
@@ -722,4 +728,6 @@ static void dbx_fx_process(const int32_t *mix, const int32_t *side, int32_t *l, 
             r[i] = br[i] + ((((r[i] - br[i]) >> 3) * g) >> 9);
         }
     fx_sat2(l, r, n, a0[FX_SAT2], a1[FX_SAT2]);
+    fx_lp(l, r, n, a0[FX_LP], a1[FX_LP]);               /* the filters last: they shape the whole sound, the echoes and tails too */
+    fx_bp(l, r, n, a0[FX_BP], a1[FX_BP]);
 }

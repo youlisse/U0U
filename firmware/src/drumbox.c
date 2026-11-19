@@ -76,14 +76,15 @@ static __attribute__((noinline)) void dbx_cpu_leave(void)
         dbx_cpu.max = pm;
     felucca_dbg.in_audio = 0;
 }
-static void dbx_cpu_line(char *b)                  /* "LOAD 23%  PEAK 41%" (the peak since it was last shown) */
+static void dbx_cpu_line(char *b, uint32_t over)   /* "LOAD 23%  PEAK 41%  OVER 0" (the peak and the samples that went past 0 dBFS, since it was last shown) */
 {
-    static const char *const W[2] = {"LOAD ", "  PEAK "};
-    uint32_t v[2], i, k = 0, j;
+    static const char *const W[3] = {"LOAD ", "  PEAK ", "  OVER "};
+    uint32_t v[3], i, k = 0, j;
     v[0] = dbx_cpu.avg / 10u;
     v[1] = dbx_cpu.max / 10u;
+    v[2] = over > 999u ? 999u : over;
     dbx_cpu.max = 0;
-    for (i = 0; i < 2u; i++) {
+    for (i = 0; i < 3u; i++) {
         for (j = 0; W[i][j]; j++)
             b[k++] = W[i][j];
         if (v[i] >= 100u)
@@ -91,11 +92,12 @@ static void dbx_cpu_line(char *b)                  /* "LOAD 23%  PEAK 41%" (the 
         if (v[i] >= 10u)
             b[k++] = (char)('0' + v[i] / 10u % 10u);
         b[k++] = (char)('0' + v[i] % 10u);
-        b[k++] = '%';
+        if (i < 2u)
+            b[k++] = '%';
     }
     b[k] = 0;
 }
-#define DBX_CPU_LINE(b) dbx_cpu_line(b)
+#define DBX_CPU_LINE(b) (dbx_cpu_line((b), dbx_audio.over), dbx_audio.over = 0)
 static void dbx_midi_poll(void);                 /* dbx_main.c: the host's MIDI queue, drained by the sequencer's block (dbx_seq.c) */
 #define DBX_MIDI_DRAIN() dbx_midi_poll()
 #define DBX_ISR_ENTER() (felucca_dbg.in_audio = 1, dbx_cpu.t0 = fm1_ticks())

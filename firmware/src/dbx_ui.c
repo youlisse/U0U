@@ -71,7 +71,7 @@ static struct {
     uint8_t page;                          /* PAGE_*: what the rows below the grid show */
     uint8_t vol;                           /* the global volume 0..127 (100: as designed) */
     uint8_t t_on, t_lane, t_step;          /* the step just placed or picked: SELECT's and the EDIT page's target */
-    uint32_t sig, psig;                    /* what the grid and the header showed last; what the pattern page did */
+    uint32_t sig, hsig, psig;              /* what the grid showed last, what the header did; what the pattern page did */
     int32_t master_knob;                   /* the MASTER pot x16, smoothed */
     uint32_t hold_t[2], hold_done[2];      /* EDIT, HOME: when pressed, and held long enough already */
     uint8_t er;                            /* ERASE: the clicks of the turn so far */
@@ -79,7 +79,7 @@ static struct {
     uint8_t fxsel;                         /* the effect picked on the FX pages */
     uint8_t t_fx;                          /* the target is an effect's step (t_lane: the effect), not a drum's */
     uint32_t scope_t;                      /* when the oscilloscope was drawn last */
-} dbx_ui = {0, DIRTY_ALL, PAGE_LANE, 100, 0, 0, 0, 0, 0, 512 * 16, {0, 0}, {1, 1}, 0, 0, 0, 0, 0, 0};
+} dbx_ui = {0, DIRTY_ALL, PAGE_LANE, 100, 0, 0, 0, 0, 0, 512 * 16, {0, 0}, {1, 1}, 0, 0, 0, 0, 0, 0, 0};
 #define DBX_FXPAGE (dbx_ui.page == PAGE_FX1 || dbx_ui.page == PAGE_FX2)
 #define DBX_F (*DBX_FXV(DBX_EV))           /* the effects' steps of the section shown */
 static uint32_t dbx_now_step(uint32_t s)               /* the playhead is on step s of what is shown (the other section of a pattern: it is not) */
@@ -997,23 +997,37 @@ static int dbx_step_edited(uint32_t i, uint32_t s)      /* a step with something
            dbx_lk_get(DBX_EV, 2, i, s) != 0 || dbx_lk_get(DBX_EV, 3, i, s) != 0;
 }
 
-static void dbx_draw_grid(void)                         /* the selected lane's (or effect's) 16 steps: bars, playhead */
+static uint32_t dbx_grid_force = 1;                     /* the cells are drawn all again (what was under them was cleared) */
+
+/* the selected lane's (or effect's) 16 steps: bars, playhead. Only the cells that changed are drawn (two at a step: the playhead leaves one and comes to the
+ * next), each with no clear of its own over the cell: clearing the strip and drawing the 16 again at every step made the panel show the black in between,
+ * and the cells blinked */
+static void dbx_draw_grid(void)
 {
+    static uint32_t cell_sig[DBX_NSTEP];
     uint32_t s, tstep = 0, has = (uint32_t)dbx_target(&tstep), fxp = DBX_FXPAGE, e = dbx_ui.fxsel;
     uint32_t bits = fxp ? DBX_F.on[e] : DBX_E.steps[dbx_ui.sel];
-    lcd_fill(11, GRID_Y - 1u, 218, GRID_H + 6u, T_BG);                         /* (the gaps, and the mark under the step picked, clean) */
     for (s = 0; s < DBX_NSTEP; s++) {
-        uint32_t x = dbx_cell_x(s), y = GRID_Y, now = dbx_now_step(s);
+        uint32_t x = dbx_cell_x(s), y = GRID_Y, now = dbx_now_step(s), on = (bits >> s) & 1u, framed = has && tstep == s;
+        uint32_t amount = on ? (fxp ? DBX_F.mix[e][s] : DBX_E.vel[dbx_ui.sel][s]) : 0u;
+        int32_t n = fxp ? 0 : DBX_E.nudge[dbx_ui.sel][s];
+        uint32_t edited = !fxp && on && dbx_step_edited(dbx_ui.sel, s);
+        uint32_t sg = now | (on << 1) | (framed << 2) | (fxp << 3) | (edited << 4) | (s % 4u == 0u ? 32u : 0u) | (amount << 8) | ((uint32_t)(n + 64) << 16) | 0x80000000u;
+        if (!dbx_grid_force && cell_sig[s] == sg)
+            continue;
+        cell_sig[s] = sg;
+        lcd_fill(x, y - 1u, GCELL, 1, T_BG);                                       /* (the rows around the cell: the frame's top, the mark under the step picked) */
+        lcd_fill(x, y + GRID_H, GCELL, 5, T_BG);
         lcd_fill(x, y, GCELL, GRID_H, now ? DBX_RED_PLAY : s % 4u == 0u ? T_RAISE : T_SURF);   /* the playhead's cell is lit whole (red) */
-        if ((bits >> s) & 1u) {
+        if (on) {
             if (fxp) {                                                     /* an effect's step: its mix is the height */
-                uint32_t h = (uint32_t)DBX_F.mix[e][s] * GRID_H / 100u;
+                uint32_t h = amount * GRID_H / 100u;
                 if (now && h > GRID_H - 5u)
                     h = GRID_H - 5u;                                       /* (a full bar leaves the playhead's cap lit) */
                 lcd_fill(x, y + GRID_H - (h < 3u ? 3u : h), GCELL, h < 3u ? 3u : h, now ? ux_mix(DBX_RED_PLAY, T_BG, 65) : T_THEME);
             } else {
-                uint32_t h = (uint32_t)DBX_E.vel[dbx_ui.sel][s] * GRID_H / 127u;
-                int32_t n = DBX_E.nudge[dbx_ui.sel][s], off = (n * (int32_t)GCELL + (n > 0 ? 24 : n < 0 ? -24 : 0)) / 48;
+                uint32_t h = amount * GRID_H / 127u;
+                int32_t off = (n * (int32_t)GCELL + (n > 0 ? 24 : n < 0 ? -24 : 0)) / 48;
                 uint32_t aoff = (uint32_t)(off < 0 ? -off : off);
                 if (now && h > GRID_H - 5u)
                     h = GRID_H - 5u;                                       /* (a full bar leaves the playhead's cap lit) */
@@ -1023,11 +1037,11 @@ static void dbx_draw_grid(void)                         /* the selected lane's (
                                                                                            * pushed right and cut at the left,
                                                                                            * an early one pushed left and cut at
                                                                                            * the right */
-                if (dbx_step_edited(dbx_ui.sel, s))
+                if (edited)
                     lcd_fill(x + GCELL - 4u, y + 2u, 3, 3, now ? T_BG : T_ACCENT);      /* a mark: its EDIT page is not the default */
             }
         }
-        if (has && tstep == s) {                                           /* the step SELECT / EDIT work on: framed in violet (a full bar is green to the
+        if (framed) {                                                      /* the step SELECT / EDIT work on: framed in violet (a full bar is green to the
                                                                             * edge, so the frame must not be), and marked under the cell, where no bar goes */
             lcd_fill(x, y, GCELL, 1, DBX_VIOLET);
             lcd_fill(x, y + GRID_H - 1u, GCELL, 1, DBX_VIOLET);
@@ -1036,6 +1050,7 @@ static void dbx_draw_grid(void)                         /* the selected lane's (
             lcd_fill(x, y + GRID_H + 2u, GCELL, 3, DBX_VIOLET);
         }
     }
+    dbx_grid_force = 0;
 }
 
 /* ---- the oscilloscope: the sound that goes out, between the title and the steps. It is drawn into the canvas strip
@@ -1939,7 +1954,7 @@ static void dbx_draw_help_page(void)
     }
 #ifdef DBX_CPU_LINE                                                 /* (the FM-1: the audio's share of the time) */
     if (dbx_help == 2u) {
-        char b[24];
+        char b[40];
         DBX_CPU_LINE(b);
         draw_text_line(12, 222, 216, &AF_S, b, T_MID, T_BG, 0);
     }
@@ -2085,7 +2100,7 @@ static void dbx_ui_draw(void)
         splash = 0;
         dbx_ui.dirty |= DIRTY_ALL;
     }
-    uint32_t k, st = 0, vs = 0, sig, tg = (uint32_t)dbx_target(&st), ed = 0, fxp = DBX_FXPAGE, e = dbx_ui.fxsel;
+    uint32_t k, st = 0, vs = 0, sig, hs, tg = (uint32_t)dbx_target(&st), ed = 0, fxp = DBX_FXPAGE, e = dbx_ui.fxsel;
     uint32_t bits = fxp ? DBX_F.on[e] : DBX_E.steps[dbx_ui.sel];
     for (k = 0; k < DBX_NSTEP; k++)
         if ((bits >> k) & 1u)
@@ -2098,10 +2113,16 @@ static void dbx_ui_draw(void)
           (dbx_saved_now() ? 0x80000000u : 0u) ^ ((uint32_t)dbx_seq.pe << 4) ^ (dbx_erased_now() ? 0x40000000u : 0u) ^
           ((uint32_t)dbx_batt.lvl * 0x1F3D5B79u) ^ (dbx_usb_powered() * 0x2545F491u) ^ ((uint32_t)dbx_seq.pl_lock * 0x3C6EF372u) ^
           ((uint32_t)dbx_seq.vs * 0x2F0B4A13u) ^ ((uint32_t)dbx_seq.cs * 0x13579BDFu) ^ ((uint32_t)((dbx_seq.two >> dbx_seq.pe) & 1u) * 0x6A09E667u);
+    hs = ((uint32_t)dbx_seq.playing << 8) ^ ((uint32_t)dbx_seq.rep << 3) ^ ((uint32_t)dbx_rec << 4) ^ ((uint32_t)dbx_seq.bpm << 1) ^ ((uint32_t)dbx_seq.ext << 28) ^
+         ((uint32_t)dbx_seq_locked() << 29) ^ (dbx_saved_now() ? 0x80000000u : 0u) ^ ((uint32_t)dbx_seq.pe << 4) ^ ((uint32_t)dbx_seq.pp << 12) ^ (dbx_erased_now() ? 0x40000000u : 0u) ^
+         ((uint32_t)dbx_batt.lvl * 0x1F3D5B79u) ^ (dbx_usb_powered() * 0x2545F491u) ^ ((uint32_t)dbx_seq.pl_lock * 0x3C6EF372u) ^ ((uint32_t)dbx_seq.vs * 0x2F0B4A13u) ^
+         ((uint32_t)((dbx_seq.two >> dbx_seq.pe) & 1u) * 0x6A09E667u) ^ ((uint32_t)dbx_seq.div << 20);      /* (the step is not in it: the header does not change at every step) */
     if (dbx_ui.dirty) {
         uint32_t all = dbx_ui.dirty & DIRTY_ALL;
         dbx_ui.dirty = 0;
         dbx_ui.sig = ~sig;                              /* the head and the grid follow */
+        dbx_ui.hsig = ~hs;
+        dbx_grid_force = 1;                             /* (the strip may have been cleared with the page) */
         dbx_ui.scope_t = 0;                             /* (the scope too, at once) */
         if (all)
             lcd_fill(0, 0, 240, 240, T_BG);
@@ -2137,13 +2158,16 @@ static void dbx_ui_draw(void)
         } else
             dbx_draw_lane_page();
     }
-    if (sig != dbx_ui.sig) {
-        dbx_ui.sig = sig;
+    if (hs != dbx_ui.hsig) {
+        dbx_ui.hsig = hs;
         dbx_draw_head();
-        if (dbx_ui.page != PAGE_HELP)
-            dbx_draw_grid();
         if (dbx_ui.page == PAGE_GLO && dbx_seq.ext)     /* the measured tempo and the lock follow */
             dbx_draw_global_page();
+    }
+    if (sig != dbx_ui.sig) {
+        dbx_ui.sig = sig;
+        if (dbx_ui.page != PAGE_HELP)
+            dbx_draw_grid();
     }
 #ifdef DBX_MIDI_DRAIN
     {   /* GLO 1, waiting for the computer: what has arrived follows (four times a second) */

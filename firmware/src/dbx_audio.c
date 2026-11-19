@@ -22,6 +22,7 @@ static struct {
     uint32_t master_q12;                   /* the MASTER pot: 4096 = unity */
     uint32_t vol_q12;                      /* the global volume (GLO + KNOB 2): 4096 = unity, at 100 of 0..127 */
     int32_t g_cur;                         /* the gain now: glides to master x vol, so a click of a knob is not heard */
+    uint32_t over;                         /* the samples that went past 0 dBFS before the ceiling since it was last read (the FM-1's load line) */
     uint32_t halves;
 } dbx_audio = {2048, 4092, 2048 * 4092 / 4096, 0};
 
@@ -48,8 +49,12 @@ static void dbx_mix_block(int32_t *out, uint32_t n)       /* n <= CTL stereo fra
             cl = dbx_limit((cl * dbx_mst.clip_q8) >> 8);
             cr = dbx_limit((cr * dbx_mst.clip_q8) >> 8);
         }
-        out[2u * i] = dbx_hard(((cl >> 3) * g) >> 9);          /* the master gain, then the ceiling: 0 dBFS, soft clip or not */
-        out[2u * i + 1u] = dbx_hard(((cr >> 3) * g) >> 9);     /* (a lane or an effect up to 2^17 x 6600 / 8 fits 32 bits) */
+        cl = ((cl >> 3) * g) >> 9;                             /* the master gain ... */
+        cr = ((cr >> 3) * g) >> 9;                             /* (a lane or an effect up to 2^17 x 6600 / 8 fits 32 bits) */
+        if (cl > 32767 || cl < -32767 || cr > 32767 || cr < -32767)
+            dbx_audio.over++;                                  /* (counted: the help's third sheet shows it) */
+        out[2u * i] = dbx_hard(dbx_limit(cl));                 /* ... then the ceiling: 0 dBFS, and the soft knee before it, so a peak that would have gone over is bent, not cut flat */
+        out[2u * i + 1u] = dbx_hard(dbx_limit(cr));
         if (!(i & 3u))
             scope_buf[scope_w++ & (SCOPE_N - 1u)] = (int16_t)out[2u * i];
     }

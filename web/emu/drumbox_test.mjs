@@ -1975,6 +1975,25 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const r = await device(w.flash()); r.render(300);
   check(`a doubled track is saved: after a restart it has its second section (${r.ex.web_two()}, step 5 ${r.ex.web_step_on(16, 0, 4)}, step 1 ${r.ex.web_step_on(16, 0, 0)})`, r.ex.web_two() === 1 && r.ex.web_step_on(16, 0, 4) === 1 && r.ex.web_step_on(16, 0, 0) === 0 && r.ex.web_step_on(0, 0, 0) === 1);
 }
+// ---- the filters (LOW PASS, BAND PASS) come last: a filter on the step where an echo comes shapes the echo too (it sat ahead of the delay, which echoed the unfiltered sound)
+{
+  const echoHighs = async (withLp) => {
+    const w = await device(); w.render(200);
+    w.key(BLACK[2], 20); w.setSteps([0]);                            // a clap on step 1
+    w.btn(B.FX); w.key(BLACK[FX.DELAY], 20); w.key(WHITE[0], 20);    // the DELAY on step 1 only: its echo (1/8, 250 ms) comes at step 3
+    w.fxSet(FX.DELAY, 1, 0); w.fxSet(FX.DELAY, 7, 127);              // no feedback, all of it
+    if (withLp) { w.key(BLACK[FX.LP], 20); w.key(WHITE[2], 20); w.fxSet(FX.LP, 0, 6); }      // the LOW PASS on step 3 alone, a low cutoff
+    w.btn(B.HOME);
+    w.btn(B.PLAY);
+    const c = w.cap(420), L = c.l, k0 = Math.round(262 * 44.1), k1 = Math.round(380 * 44.1);
+    let hi = 0, tot = 0;
+    for (let i = k0 + 1; i < k1; i++) { const d = L[i] - L[i - 1]; hi += d * d; tot += L[i] * L[i]; }
+    w.btn(B.PLAY);
+    return { highs: Math.sqrt(hi / (k1 - k0)), rms: Math.sqrt(tot / (k1 - k0)) };
+  };
+  const open = await echoHighs(false), shut = await echoHighs(true);
+  check(`a DELAY echo that comes on a LOW PASS step is filtered (its highs ${open.highs.toFixed(4)} without, ${shut.highs.toFixed(4)} with)`, open.highs > 0.001 && shut.highs < open.highs * 0.5);
+}
 // ---- the effects follow the section that plays: a step of an effect set in the second section opens it there (and not in the first)
 {
   const w = await device(); w.render(200);
