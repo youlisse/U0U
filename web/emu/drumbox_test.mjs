@@ -1992,6 +1992,31 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const plain = await loop(null), dly = await loop(127);
   check(`MASTER at the top: the loop peaks at ${plain.pk.toFixed(3)}, with a delay at full feedback ${dly.pk.toFixed(3)}: below 0 dBFS, nothing cut (${dly.over} samples at the ceiling)`, plain.pk < 0.9 && dly.pk < 0.97 && dly.over === 0);
 }
+// ---- the DELAY does not double the volume: a kick on every step, full MIX and feedback, comes out under about 3 dB over the dry (it was 5.6); a lone echo is left alone
+{
+  const kicks = async (fx) => {
+    const w = await device(); w.render(200);
+    w.key(BLACK[0], 20); w.setSteps([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    if (fx) { w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME); w.fxSet(FX.DELAY, 1, 100); w.fxSet(FX.DELAY, 7, 127); w.btn(B.HOME); }
+    w.ex.web_buttons(1 << B.PLAY); w.render(2500);
+    const c = w.cap(4000); w.ex.web_buttons(0);
+    let t = 0, pk = 0; for (const x of c.l) { t += x * x; pk = Math.max(pk, Math.abs(x)); }
+    return { rms: Math.sqrt(t / c.l.length), pk };
+  };
+  const dry = await kicks(false), wet = await kicks(true);
+  const dr = 20 * Math.log10(wet.rms / dry.rms), dp = 20 * Math.log10(wet.pk / dry.pk);
+  check(`DELAY at full MIX and a high FEEDBACK (100) under a kick on every step: ${dr.toFixed(1)} dB louder (rms), ${dp.toFixed(1)} dB (peak): under 3 and 3.5`, dr < 3 && dp < 3.5);
+  const lone = async (mix) => {
+    const w = await device(); w.render(200);
+    w.key(BLACK[7], 20); w.setSteps([0]);
+    w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME); w.fxSet(FX.DELAY, 1, 0); w.fxSet(FX.DELAY, 7, mix); w.btn(B.HOME);
+    w.ex.web_buttons(1 << B.PLAY); const c = Array.from(w.cap(600).l); w.ex.web_buttons(0);
+    const pkOf = (t0, t1) => { let m = 0; for (let i = Math.round(t0 * 44.1); i < Math.round(t1 * 44.1); i++) m = Math.max(m, Math.abs(c[i])); return m; };
+    return 20 * Math.log10(pkOf(245, 330) / pkOf(0, 60));
+  };
+  const e = await lone(127);
+  check(`  a lone echo at full MIX stays about 7 dB under its hit, the guard does not touch it (${e.toFixed(1)} dB)`, e > -8 && e < -6);
+}
 // ---- the filters (LOW PASS, BAND PASS) come last: a filter on the step where an echo comes shapes the echo too (it sat ahead of the delay, which echoed the unfiltered sound)
 {
   const echoHighs = async (withLp) => {

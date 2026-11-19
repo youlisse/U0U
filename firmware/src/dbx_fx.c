@@ -485,6 +485,49 @@ static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
     dly.act = (int32_t)pk;
 }
 
+/* The delay's level guard. Echoes of a repeating sound land on the next hit and add to it (a kick on every step with a delay of two steps: each echo falls on
+ * a kick, in phase; at full MIX and a high FEEDBACK that doubled the volume). The sum after the delay is kept to about 1 dB over the peaks that went in (a little more while the gain comes down) (the
+ * recent ones: the reference rises at once and falls over about 0.7 s): a gain that comes down at once and goes back up over some 90 ms. An echo in a gap
+ * is far under that and is left alone; so is a delay that has nothing to do. */
+static struct { int32_t ref, g; } dgd = {0, 4096};
+
+static void fx_delay_guard(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
+{
+    uint32_t i;
+    int32_t pd = 0, po = 0, cap, tg, g0 = dgd.g, g1;
+    if (a0 == 0 && a1 == 0 && dly.act < 8) {
+        dgd.g = 4096;
+        dgd.ref = 0;
+        fx_delay(l, r, n, a0, a1);
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        int32_t x = l[i] < 0 ? -l[i] : l[i], y = r[i] < 0 ? -r[i] : r[i];
+        pd = x > pd ? x : pd;
+        pd = y > pd ? y : pd;
+    }
+    fx_delay(l, r, n, a0, a1);
+    for (i = 0; i < n; i++) {
+        int32_t x = l[i] < 0 ? -l[i] : l[i], y = r[i] < 0 ? -r[i] : r[i];
+        po = x > po ? x : po;
+        po = y > po ? y : po;
+    }
+    dgd.ref = pd > dgd.ref ? pd : dgd.ref - (dgd.ref >> 10);
+    cap = dgd.ref + (dgd.ref >> 3);                                                 /* (+1 dB over what came in) */
+    if (cap < 4000)
+        cap = 4000;                                                                 /* (a tail under -18 dBFS is left as it rings) */
+    tg = po > cap ? (int32_t)((int64_t)cap * 4096 / po) : 4096;
+    g1 = tg < g0 ? tg : g0 + ((4096 - g0) >> 7);
+    if (g0 == 4096 && g1 == 4096)
+        return;
+    for (i = 0; i < n; i++) {
+        int32_t g = g0 + (g1 - g0) * (int32_t)(i + 1u) / (int32_t)n;
+        l[i] = ((l[i] >> 3) * g) >> 9;                                              /* (|x| up to 2^17: >> 3, x 2^12, >> 9 keeps 32 bits) */
+        r[i] = ((r[i] >> 3) * g) >> 9;
+    }
+    dgd.g = g1;
+}
+
 /* ------------------------------------------------------------- REVERB --- */
 /* a stereo Freeverb: four combs and two allpasses a side, SIZE sets the feedback, DAMP darkens it, PRE delays it */
 #define RV_MAXC 1400u
@@ -718,7 +761,7 @@ static void dbx_fx_process(const int32_t *mix, const int32_t *side, int32_t *l, 
     else
         duck = 0;
     fx_flanger(l, r, n, a0[FX_FLANGE], a1[FX_FLANGE]);
-    fx_delay(l, r, n, a0[FX_DELAY], a1[FX_DELAY]);
+    fx_delay_guard(l, r, n, a0[FX_DELAY], a1[FX_DELAY]);
     fx_repeat(l, r, n, a0[FX_REPEAT], a1[FX_REPEAT]);
     fx_reverb(l, r, n, a0[FX_REVERB], a1[FX_REVERB]);
     if (duck)
