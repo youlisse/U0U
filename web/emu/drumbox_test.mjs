@@ -1256,14 +1256,14 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   }
   // DELAY: one rim, a tempo-synced echo (1/8 at 120 BPM: 250 ms), without feedback, ping pong off: the same echo on both sides
   { const one = (w) => { w.key(BLACK[7], 30); w.setSteps([0]); };
-    const f = await run(FX.DELAY, { 1: 0, 2: "off", 3: 0, 7: 127 }, { drums: one, ms: 900 }), d = await run(FX.DELAY, { 1: 0, 2: "off", 3: 0, 7: 127 }, { drums: one, ms: 900, cont: false });
+    const f = await run(FX.DELAY, { 1: 0, 2: "off", 3: 0 }, { drums: one, ms: 900 }), d = await run(FX.DELAY, { 1: 0, 2: "off", 3: 0 }, { drums: one, ms: 900, cont: false });
     const of = onsetsOf(f.l), od = onsetsOf(d.l);
     check(`DELAY (1/8, no feedback): the rim, then its echo 250 ms later (${of.map((x) => x.toFixed(0)).join(" ")} against ${od.map((x) => x.toFixed(0)).join(" ")})`,
           od.length === 1 && of.length >= 2 && near(of[1] - of[0], 250, 4));
     check("  PING PONG off: the same echo on both sides", onsetsOf(f.r).length === of.length && near(onsetsOf(f.r)[1] - onsetsOf(f.r)[0], 250, 4));
-    const g = await run(FX.DELAY, { 1: 100, 2: "off", 3: 0, 7: 127 }, { drums: one, ms: 1500 });
-    check(`  with FEEDBACK the echo repeats (${onsetsOf(g.l, 8, 0.004).length} hits)`, onsetsOf(g.l, 8, 0.004).length >= 4);
-    const h = await run(FX.DELAY, { 1: 0, 2: "off", 3: 127, 7: 127 }, { drums: one, ms: 900 });
+    const g = await run(FX.DELAY, { 1: 80, 2: "off", 3: 0, 7: 127 }, { drums: one, ms: 1500 });
+    check(`  with FEEDBACK the echo repeats (${onsetsOf(g.l, 8, 0.006).length} hits)`, onsetsOf(g.l, 8, 0.006).length >= 4);
+    const h = await run(FX.DELAY, { 1: 0, 2: "off", 3: 127 }, { drums: one, ms: 900 });
     const hl = onsetsOf(h.l), hr = onsetsOf(h.r);
     check(`  SPREAD (ping pong off): the right echo comes later, ${hr[1] !== undefined ? (hr[1] - hl[1]).toFixed(0) : "?"} ms after the left (half a step: 62)`, hl.length >= 2 && hr.length >= 2 && near(hr[1] - hl[1], 62.5, 6));
     // PING PONG on: the echoes alternate, the first on the left, the second on the right
@@ -1272,7 +1272,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     const has = (a, t) => a.some((x) => near(x, t, 6));
     check(`  PING PONG on: the first echo (250 ms) is on the left (${ol.map((x) => x.toFixed(0)).join(" ")}), not the right (${or.map((x) => x.toFixed(0)).join(" ")})`, has(ol, ol[0] + 250) && !has(or, or[0] + 250));
     check("  the second (500 ms) is on the right, not the left", has(or, ol[0] + 500) && !has(ol, ol[0] + 500));
-    const zero = await run(FX.DELAY, { 1: 70, 3: 0, 7: 127 }, { drums: one, ms: 1200 });
+    const zero = await run(FX.DELAY, { 1: 70, 3: 0 }, { drums: one, ms: 1200 });
     check("  SPREAD 0: both echoes in the middle (left and right alike)", near(rms(zero.l), rms(zero.r), rms(zero.l) * 0.05));
   }
   // REVERB: a tail where the dry sound is silent
@@ -2015,7 +2015,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     return 20 * Math.log10(pkOf(245, 330) / pkOf(0, 60));
   };
   const e = await lone(127);
-  check(`  a lone echo at full MIX stays 9 to 13 dB under its hit, on its side at the default SPREAD (${e.toFixed(1)} dB)`, e > -13 && e < -9);
+  check(`  a lone echo at full MIX stays 8 to 10 dB under its hit, on its side at the default SPREAD (${e.toFixed(1)} dB)`, e > -10 && e < -8);
 }
 // ---- the DELAY is no louder than the dry sound: a loop with it open on every step, at any MIX and FEEDBACK, comes out within 1 dB of the same loop without it
 {
@@ -2037,7 +2037,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     }
   }
   const worst = rows.reduce((m, r) => Math.max(m, Math.abs(r.db)), 0), worstp = rows.reduce((m, r) => Math.max(m, r.dp), -9);
-  check(`DELAY open on every step, 1 / 3 / 6 drums, MIX and FEEDBACK from the start to the top: the level is within ${worst.toFixed(1)} dB (rms) and ${worstp.toFixed(1)} dB (peak) of the dry loop`, worst < 2 && worstp < 2);
+  check(`DELAY open on every step, 1 / 3 / 6 drums, MIX and FEEDBACK from the start to the top: the level is within ${worst.toFixed(1)} dB (rms) and ${worstp.toFixed(1)} dB (peak) of the dry loop`, worst < 1.5 && worstp < 1.5);
 }
 // ---- the output limiter: MASTER and VOLUME at the top, three drums on every step, a delay at full MIX and feedback: nothing goes past -0.2 dBFS, nothing is cut flat
 {
@@ -2098,7 +2098,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   };
   const dry = await loop(null); let worst = 0;
   for (const fx of [{ fb: 60, sp: 0 }, { fb: 100, sp: 60 }, { fb: 127, sp: 127 }, { fb: 127, sp: 0 }]) worst = Math.max(worst, Math.abs(20 * Math.log10((await loop(fx)) / dry)));
-  check(`  a kick on every step, PING PONG off, FEEDBACK 60 to 127, SPREAD 0 to 127: the level is within ${worst.toFixed(1)} dB of the dry loop`, worst < 2);
+  check(`  a kick on every step, PING PONG off, FEEDBACK 60 to 127, SPREAD 0 to 127: the level is within ${worst.toFixed(1)} dB of the dry loop`, worst < 1.5);
 }
 // ---- the DELAY's SPREAD (PING PONG on) moves the echoes from the middle to the sides at the same power: an echo's level on its side changes by under 4 dB from SPREAD 0 to 127
 {
@@ -2114,46 +2114,6 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const lv = []; for (const sp of [0, 40, 80, 127]) lv.push(await first(sp));
   const spread = Math.max(...lv) - Math.min(...lv);
   check(`the first echo's loudest side at SPREAD 0, 40, 80, 127: ${lv.map((x) => x.toFixed(1)).join(", ")} dB (${spread.toFixed(1)} dB apart; it was 6)`, spread < 4);
-}
-// ---- the DELAY and the REVERB are sends: each drum has its own send to each (GLO + the drum's key, on the effect's page), the return is in parallel
-const gloKey = (d, lane) => { d.ex.web_buttons(1 << B.GLO); d.render(60); d.ex.web_keys(1 << BLACK[lane]); d.render(60); d.ex.web_keys(0); d.render(60); d.ex.web_buttons(0); d.render(120); };   // GLO held, a drum's key tapped
-{
-  const w = await device(); w.render(200);
-  const sends = () => [0, 1, 7].map((k) => w.ex.web_send(k, 0) + "/" + w.ex.web_send(k, 1)).join(" ");
-  check(`every drum starts sending all of itself to both (${sends()}: delay/reverb)`, [...Array(11).keys()].every((k) => w.ex.web_send(k, 0) === 15 && w.ex.web_send(k, 1) === 15));
-  w.btn(B.FX); w.key(BLACK[7], 30);                                              // the DELAY's page
-  const seen = [];
-  for (let n = 0; n < 5; n++) { gloKey(w, 1); seen.push(w.ex.web_send(1, 0)); }
-  check(`on the DELAY's page, GLO + the snare's key: its send goes 2/3, 1/3, none, all again (${seen.join(" ")}), the page stays (${w.ex.web_page()})`,
-        seen.join(" ") === "10 5 0 15 10" && w.ex.web_page() === 5 && w.ex.web_send(1, 1) === 15 && w.ex.web_send(0, 0) === 15);
-  gloKey(w, 1); gloKey(w, 1); gloKey(w, 1);   // 5, 0, 15
-  w.key(BLACK[9], 30);                                                           // the REVERB's page
-  gloKey(w, 0);
-  check(`  on the REVERB's page the kick's send to it changes (${w.ex.web_send(0, 1)}), the delay's does not (${w.ex.web_send(0, 0)})`, w.ex.web_send(0, 1) === 10 && w.ex.web_send(0, 0) === 15);
-  w.render(4000);
-  const r = await device(w.flash()); r.render(300);
-  check(`  the sends are saved (the kick's to the reverb ${r.ex.web_send(0, 1)}, the snare's to the delay ${r.ex.web_send(1, 0)})`, r.ex.web_send(0, 1) === 10 && r.ex.web_send(1, 0) === 15 && r.ex.web_send(2, 1) === 15);
-  w.hold(B.HOME, 800);
-  check(`  HOME held: the sound starts over, every send is all again (${w.ex.web_send(0, 1)})`, w.ex.web_send(0, 1) === 15);
-}
-{
-  // what goes into the DELAY is what the drums send: a kick and a rim, the kick's send to the delay cut: the rim's echo is there, the kick's is not
-  const run = async (kickSend) => {
-    const w = await device(); w.render(200);
-    w.key(BLACK[0], 20); w.setSteps([0]);
-    w.key(BLACK[7], 20); w.setSteps([8]);
-    w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME);
-    w.ex.web_set_fxparam(FX.DELAY, 7, 127); w.ex.web_set_fxparam(FX.DELAY, 1, 0); w.ex.web_set_fxparam(FX.DELAY, 3, 0);
-    w.btn(B.FX); w.key(BLACK[7], 30);
-    for (let n = 0; n < (kickSend ? 0 : 3); n++) gloKey(w, 0);      // 15 -> 10 -> 5 -> 0
-    w.btn(B.HOME);
-    w.ex.web_buttons(1 << B.PLAY); const c = w.cap(1500); w.ex.web_buttons(0);
-    const pk = (t0, t1) => { let m = 0; for (let i = Math.round(t0 * 44.1); i < Math.round(t1 * 44.1); i++) m = Math.max(m, Math.abs(c.l[i]), Math.abs(c.r[i])); return m; };
-    return { kickEcho: pk(250, 330), rimEcho: pk(1250, 1330) };
-  };
-  const all = await run(true), cut = await run(false);
-  check(`the kick's send to the delay cut: its echo ${cut.kickEcho.toFixed(4)} (all sent: ${all.kickEcho.toFixed(4)}), the rim's echo stays (${cut.rimEcho.toFixed(4)}, all sent: ${all.rimEcho.toFixed(4)})`,
-        all.kickEcho > 0.01 && cut.kickEcho < all.kickEcho * 0.1 && cut.rimEcho > all.rimEcho * 0.8);
 }
 // ---- the filters (LOW PASS, BAND PASS) come last: a filter on the step where an echo comes shapes the echo too (it sat ahead of the delay, which echoed the unfiltered sound)
 {

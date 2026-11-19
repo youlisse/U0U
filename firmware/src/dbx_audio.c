@@ -38,17 +38,17 @@ static inline uint32_t dbx_master_of_pot(uint32_t k10) { return (k10 * k10 * 181
 
 static void dbx_mix_block(int32_t *out, uint32_t n)       /* n <= CTL stereo frames, Q15 */
 {
-    int32_t mix[CTL], side[CTL], ds[CTL], rs[CTL], l[CTL], r[CTL], nl[CTL], nr[CTL], pk = 0, req, ge, gs = dbx_lim.g, gq, dg;
+    int32_t mix[CTL], side[CTL], l[CTL], r[CTL], nl[CTL], nr[CTL], pk = 0, req, ge, gs = dbx_lim.g, gq, dg;
     int32_t gt = (int32_t)((dbx_audio.master_q12 * dbx_audio.vol_q12) >> 12), d = gt - dbx_audio.g_cur, g;
     uint32_t i;
     dbx_audio.g_cur += d > -16 && d < 16 ? d : d >> 4;        /* (a glide of ~12 ms, and exactly there at the end) */
     g = dbx_audio.g_cur;
     dbx_seq_block(n);                                   /* the step clock: the steps starting in this block hit */
     for (i = 0; i < n; i++)
-        mix[i] = side[i] = ds[i] = rs[i] = 0;
-    dbx_voices_render(mix, side, ds, rs, n);
+        mix[i] = side[i] = 0;
+    dbx_voices_render(mix, side, n);
     dbx_lfo_tick(n);                                    /* the LFOs run on; the effects chain takes LFO 1 at its head and LFO 2 where it is stereo */
-    dbx_fx_process(mix, side, ds, rs, l, r, n);                       /* the step effects: mono sum in, stereo out */
+    dbx_fx_process(mix, side, l, r, n);                       /* the step effects: mono sum in, stereo out */
     dbx_master_process(l, r, n);                        /* the SCL page: HPF, LPF, OTT */
     for (i = 0; i < n; i++) {
         int32_t cl = l[i], cr = r[i], a;

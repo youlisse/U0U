@@ -393,14 +393,6 @@ static void dbx_ui_input(void)
     for (k = 0; k < DBX_NKEY; k++) {
         if (!((pressed >> k) & 1u))
             continue;
-        if (DBX_LANE_OF_KEY[k] >= 0 && fxp && (dbx_ui.fxsel == FX_DELAY || dbx_ui.fxsel == FX_REVERB) && (fm1_in.buttons & PANEL_BTN(B_GLO))) {
-            uint8_t *sv = dbx_ui.fxsel == FX_DELAY ? &lane[DBX_LANE_OF_KEY[k]].sd : &lane[DBX_LANE_OF_KEY[k]].sr;   /* GLO held, a lane's key, on the DELAY or REVERB page: how much of that lane is sent to it, */
-            *sv = *sv > 10u ? 10u : *sv > 5u ? 5u : *sv > 0u ? 0u : 15u;                                      /* all, 2/3, 1/3, none, and round again */
-            dbx_glo_used = 1;
-            dbx_touch_set();
-            dbx_ui.dirty |= DIRTY_LANE;
-            continue;
-        }
         if (DBX_LANE_OF_KEY[k] >= 0 && !fxp && (fm1_in.buttons & PANEL_BTN(B_GLO))) {   /* GLO held, a lane's key: MUTE (let go), or SOLO (held) */
             dbx_glo_used = 1;
             dbx_mute_t[DBX_LANE_OF_KEY[k]] = fm1_ms;
@@ -1751,32 +1743,6 @@ static void dbx_draw_arp_view(void)
     lcd_sync();
 }
 
-/* The DELAY's and the REVERB's pages: in the oscilloscope's place, what each drum sends to the effect (a bar a drum, 0..15; GLO + a drum's key changes it), under its
- * first letter; a muted drum's in red. */
-static void dbx_draw_send_view(void)
-{
-    static const char LETTER[DBX_NLANE] = {'K', 'S', 'C', 'H', 'O', 'T', 'N', 'R', 'V', 'B', 'Y'};   /* kick snare clap hat-closed hat-open tom coNga rim claVe bell cYmbal */
-    uint32_t n, del = dbx_ui.fxsel == FX_DELAY;
-    int32_t colw = (int32_t)SCOPE_W / (int32_t)DBX_NLANE, base = (int32_t)SCOPE_H - 17, hmax = (int32_t)SCOPE_H - 36;
-    cv_begin(SCOPE_W, SCOPE_H, T_BG);
-    cv_rrect(0, 0, (int32_t)SCOPE_W, (int32_t)SCOPE_H, 6, T_SURF, T_BG);
-    cv_text(9, 4, &AF_S, del ? "SEND: DELAY" : "SEND: REVERB", T_MID);
-    cv_text_r((int32_t)SCOPE_W - 9, 4, &AF_S, "GLO + KEY", T_DIM, T_SURF);
-    for (n = 0; n < DBX_NLANE; n++) {
-        uint32_t v = del ? lane[n].sd : lane[n].sr;
-        int32_t x = 5 + (int32_t)n * colw, h = (int32_t)v * hmax / 15;
-        char c[2] = {LETTER[n], 0};
-        cv_rect(x + 2, base - hmax, colw - 5, hmax, T_BG);                                            /* the empty bar */
-        if (h > 0)
-            cv_rect(x + 2, base - h, colw - 5, h, T_THEME);
-        else
-            cv_rect(x + 2, base - 1, colw - 5, 1, T_DIM);
-        cv_text(x + colw / 2 - 3, (int32_t)SCOPE_H - 14, &AF_S, c, lane[n].mute ? DBX_RED_LIGHT : n == dbx_ui.sel ? T_TEXT : T_MID);
-    }
-    cv_blit(SCOPE_X, SCOPE_Y);
-    lcd_sync();
-}
-
 /* EDIT 2: the step's own DECAY, TONE, EXTRA (named by the drum) and PAN, added to the lane's (none picked: the lane's steps') */
 static const char *const DBX_EXTRA_NAME[DVT_COUNT] = {"DRIVE", "DRIVE", "SNAPPY", "SPREAD", "SIZZLE", "SIZZLE", "BEND", "BEND", "DRIVE", "DRIVE", "STRIKE", "STRIKE"};
 
@@ -1965,12 +1931,12 @@ static void dbx_draw_pat_page(void)                     /* SAVE: the 16 patterns
 /* ---- the help: a tap of SEQ, three pages, each a label and what it does; a tap goes on, HOME closes */
 static const char *const HELP_L[3][13] = {
     {"FX", "SCL", "ENV", "LFO", "EDIT", "GLO", "SAVE", "ARP", "SEQ", "REC", "OCT -/+", "PLAY", "HOME"},
-    {"HOME HELD", "EDIT HELD", "SAVE HELD", "GLO + KEY", "(HELD)", "SEQ HELD", "SEQ + K1", "FX EDIT ARP", "WHITE KEYS", "BLACK KEYS", "DLY/REV+GLO", "", ""},
+    {"HOME HELD", "EDIT HELD", "SAVE HELD", "GLO + KEY", "(HELD)", "SEQ HELD", "SEQ + K1", "FX EDIT ARP", "WHITE KEYS", "BLACK KEYS", "", "", ""},
     {"SELECT", "ALGO", "PRESETS", "K1 - K4", "MASTER", "GLO 2 K4", "GLO 1", "GLO 2", "KICK TUNE", "", "", "", ""},
 };
 static const char *const HELP_T[3][13] = {
     {"EFFECTS (2 PAGES)", "HPF LPF OTT CLIP", "DUCK / ATK DEC GATE", "VOLUME / PAN LFO", "STEP, LANE, STEP SND", "TEMPO.. / SWING KIT", "PATTERNS / SONG", "EUCLID / MUTATE", "TAP HELP, HOLD LOOP", "KEYS SOUND + WRITE", "TRACK 1 / 2", "START / STOP", "CLOSE A PAGE"},
-    {"FULL RESET", "CLEAR LANE / PAGE", "SAVE NOW", "MUTE THE LANE", "SOLO THE LANE", "LOOP THE LAST BEAT", "THE LOOP'S LENGTH", "TAP: NEXT PAGE", "THE 16 STEPS", "THE 11 DRUMS", "A DRUM'S SEND", "", ""},
+    {"FULL RESET", "CLEAR LANE / PAGE", "SAVE NOW", "MUTE THE LANE", "SOLO THE LANE", "LOOP THE LAST BEAT", "THE LOOP'S LENGTH", "TAP: NEXT PAGE", "THE 16 STEPS", "THE 11 DRUMS", "", "", ""},
     {"VELOCITY / FX MIX", "PAN / EFFECT (FX)", "SCROLL THE STEPS", "THE 4 ROWS", "OUTPUT LEVEL", "FULL TURN: RESET", "BPM VOL SYNC SUB", "SWING MIX KIT", "SHOWN AS A NOTE", "", "", "", ""},
 };
 static const char *const HELP_TITLE[3] = {"BUTTONS", "HOLDS", "KNOBS"};
@@ -2011,7 +1977,7 @@ static uint32_t dbx_mixer_sig(void)
 {
     uint32_t n, h = dbx_ui.sel;
     for (n = 0; n < DBX_NLANE; n++)
-        h = h * 31u + lane[n].mute * 3u + (uint32_t)(lane[n].pan + 40) + lane[n].sd * 7u + lane[n].sr * 11u;
+        h = h * 31u + lane[n].mute * 3u + (uint32_t)(lane[n].pan + 40);
     return h;
 }
 
@@ -2027,22 +1993,15 @@ static void dbx_draw_mixer(void)
     draw_text_line(12, TITLE_Y, 216, &AF_L, "MIXER", T_THEME, T_BG, 0);
     for (n = 0; n < DBX_NLANE; n++) {
         uint32_t y = 54u + n * 15u, mute = lane[n].mute, solo = unmuted == 1u && n == alone;
-        char pv[16] = "", dv[8] = "D", rv[8] = "R";
+        char pv[16] = "";
         dbx_cat_pan(pv, lane[n].pan);
-        dbx_cat_int(dv, (int32_t)lane[n].sd * 100 / 15);
-        dbx_cat_int(rv, (int32_t)lane[n].sr * 100 / 15);
         if (n == dbx_ui.sel)
             lcd_fill(4, y + 1u, 3, 12, DBX_VIOLET);                      /* (the lane selected) */
-        draw_text_line(12, y, 52, &AF_S, DBX_NAME[n], mute ? DBX_RED_LIGHT : T_THEME, T_BG, 0);
-        draw_text_line(66, y, 42, &AF_S, pv, T_MID, T_BG, 0);
-        draw_text_line(110, y, 34, &AF_S, dv, lane[n].sd ? T_TEXT : T_DIM, T_BG, 0);     /* the sends to the DELAY and the REVERB */
-        draw_text_line(146, y, 34, &AF_S, rv, lane[n].sr ? T_TEXT : T_DIM, T_BG, 0);
-        draw_text_line(184, y, 44, &AF_S, mute ? "MUTE" : solo ? "SOLO" : "", mute ? DBX_RED_LIGHT : DBX_VIOLET, T_BG, 2);
+        draw_text_line(12, y, 84, &AF_S, DBX_NAME[n], mute ? DBX_RED_LIGHT : T_THEME, T_BG, 0);
+        draw_text_line(100, y, 70, &AF_S, pv, T_MID, T_BG, 0);
+        draw_text_line(172, y, 56, &AF_S, mute ? "MUTE" : solo ? "SOLO" : "", mute ? DBX_RED_LIGHT : DBX_VIOLET, T_BG, 2);
     }
-    if (DBX_FXPAGE && (dbx_ui.fxsel == FX_DELAY || dbx_ui.fxsel == FX_REVERB))
-        draw_text_line(12, 222, 216, &AF_S, "KEY: THE SEND  ALL 2/3 1/3 NONE", T_MID, T_BG, 0);
-    else
-        draw_text_line(12, 222, 216, &AF_S, "KEY: MUTE    KEY HELD: SOLO", T_MID, T_BG, 0);
+    draw_text_line(12, 222, 216, &AF_S, "KEY: MUTE    KEY HELD: SOLO", T_MID, T_BG, 0);
 }
 
 static uint32_t dbx_song_sig(void)                       /* what the song page shows */
@@ -2257,8 +2216,6 @@ static void dbx_ui_draw(void)
             dbx_draw_env_view();                        /* (so is an ENV page's) */
         else if (dbx_ui.page == PAGE_ARP1 || dbx_ui.page == PAGE_ARP2)
             dbx_draw_arp_view();                        /* (and an ARP page's) */
-        else if (fxp && (dbx_ui.fxsel == FX_DELAY || dbx_ui.fxsel == FX_REVERB))
-            dbx_draw_send_view();                       /* (the DELAY's and the REVERB's: which drums are sent to it) */
         else
             dbx_draw_scope();
     }

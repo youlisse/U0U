@@ -36,7 +36,7 @@ static void dbx_snap_take(dbx_snap_t *d)                    /* the live sound in
         d->k[i].accent = lane[i].p.accent;
         d->k[i].pan = lane[i].pan;
         d->k[i].choke = lane[i].choke;                     /* (the mutes are not a pattern's: see dbx_ui.c) */
-        d->k[i].pad = (uint8_t)(((15u - lane[i].sd) << 4) | (15u - lane[i].sr));     /* the sends to the DELAY and the REVERB, as what is cut (a save from before has 0: all of it) */
+        d->k[i].pad = 0;
     }
     for (e = 0; e < DBX_NFX; e++)
         for (k = 0; k < DBX_NFXP; k++)
@@ -71,8 +71,6 @@ static void dbx_snap_give(const dbx_snap_t *s)               /* s as the live so
         lane[i].p.accent = (uint8_t)clamp(s->k[i].accent, 0, 127);
         lane[i].pan = (int8_t)clamp(s->k[i].pan, -32, 32);
         lane[i].choke = DBX_CHOKE_DEF[i];                  /* (no page sets it: what an older save holds is not read) */
-        lane[i].sd = (uint8_t)(15u - (s->k[i].pad >> 4 & 15u));
-        lane[i].sr = (uint8_t)(15u - (s->k[i].pad & 15u));
     }
     for (e = 0; e < DBX_NFX; e++) {
         for (k = 0; k < DBX_NFXP; k++)

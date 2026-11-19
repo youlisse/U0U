@@ -402,7 +402,6 @@ EXPORT uint32_t web_fxsel(void) { return dbx_ui.fxsel; }
 EXPORT uint32_t web_fxmaster(void) { return dbx_fx.master; }
 EXPORT int32_t web_fxamt(uint32_t e) { return e < DBX_NFX ? dbx_fx.am[e] : -1; }                  /* the amount: envelope x mixes, 0..65536 */
 EXPORT int32_t web_fxenv(uint32_t e) { return e < DBX_NFX ? dbx_fx.env[e] : -1; }                 /* the envelope, 0..65536 */
-EXPORT uint32_t web_send(uint32_t lane_i, uint32_t which) { return lane_i < DBX_NLANE ? (which ? lane[lane_i].sr : lane[lane_i].sd) : 0u; }   /* a lane's send to the DELAY (0) or the REVERB (1) */
 EXPORT uint32_t web_fxparam(uint32_t e, uint32_t i) { return e < DBX_NFX && i < DBX_NFXP ? dbx_fx.p[e][i] : 0; }
 EXPORT uint32_t web_fxstep(uint32_t p, uint32_t e, uint32_t s) { return p < DBX_NVP && e < DBX_NFX && s < DBX_NSTEP ? (DBX_FXV(p)->on[e] >> s) & 1u : 0; }      /* (p + 16: the second section) */
 EXPORT uint32_t web_fxmix(uint32_t p, uint32_t e, uint32_t s) { return p < DBX_NVP && e < DBX_NFX && s < DBX_NSTEP ? DBX_FXV(p)->mix[e][s] : 0; }
