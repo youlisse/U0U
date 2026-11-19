@@ -1954,7 +1954,7 @@ static void dbx_draw_help_page(void)
     }
 #ifdef FELUCCA_ID                                                   /* (the FM-1: which package this is, at the foot of the second sheet) */
     if (dbx_help == 1u)
-        draw_text_line(12, 222, 216, &AF_S, "U0U " FELUCCA_VERSION "  " FELUCCA_ID, T_MID, T_BG, 0);
+        draw_text_line(12, 222, 216, &AF_S, "U0U " FELUCCA_VERSION "  " FELUCCA_ID FELUCCA_STAMP, T_MID, T_BG, 0);
 #endif
 #ifdef DBX_CPU_LINE                                                 /* (the FM-1: the audio's share of the time) */
     if (dbx_help == 2u) {
