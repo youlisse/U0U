@@ -1112,8 +1112,8 @@ for (let i = 0; i < BLACK.length; i++) {
   const w = await device(); w.render(200);
   w.btn(B.FX);
   for (const e of [FX.DELAY, FX.SAT1, FX.HALF, FX.PAN, FX.REVERB]) { w.key(BLACK[e], 20); w.key(WHITE[0], 20); }
-  check(`a step of every effect starts at a mix of 100 (the delay's and the reverb's amount is the effect's MIX: ${w.ex.web_fxparam(FX.DELAY, 7)} = 50 %, ${w.ex.web_fxparam(FX.REVERB, 7)} = 20 %)`,
-        [FX.DELAY, FX.REVERB, FX.SAT1, FX.HALF, FX.PAN].every((e) => w.ex.web_fxmix(0, e, 0) === 100) && w.ex.web_fxparam(FX.DELAY, 7) === 64 && w.ex.web_fxparam(FX.REVERB, 7) === 26 &&
+  check(`a step of every effect starts at a mix of 100 (the delay's and the reverb's amount is the effect's MIX: ${w.ex.web_fxparam(FX.DELAY, 7)} = 40 %, ${w.ex.web_fxparam(FX.REVERB, 7)} = 20 %)`,
+        [FX.DELAY, FX.REVERB, FX.SAT1, FX.HALF, FX.PAN].every((e) => w.ex.web_fxmix(0, e, 0) === 100) && w.ex.web_fxparam(FX.DELAY, 7) === 51 && w.ex.web_fxparam(FX.REVERB, 7) === 26 &&
         [FX.SAT1, FX.HALF, FX.PAN, FX.LP].every((e) => w.ex.web_fxparam(e, 7) === 127));
   check(`  the REVERB starts at SIZE 20 %, WIDTH 20 % (${w.ex.web_fxparam(FX.REVERB, 0)}, ${w.ex.web_fxparam(FX.REVERB, 3)} of 127 = ${Math.floor(w.ex.web_fxparam(FX.REVERB, 0) * 100 / 127)} %, ${Math.floor(w.ex.web_fxparam(FX.REVERB, 3) * 100 / 127)} %), MIX 20 %`, Math.floor(w.ex.web_fxparam(FX.REVERB, 0) * 100 / 127) === 20 && Math.floor(w.ex.web_fxparam(FX.REVERB, 3) * 100 / 127) === 20 && Math.floor(w.ex.web_fxparam(FX.REVERB, 7) * 100 / 127) === 20);
   w.turn(EN.SELECT, -2);
@@ -1262,7 +1262,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
           od.length === 1 && of.length >= 2 && near(of[1] - of[0], 250, 4));
     check("  PING PONG off: the same echo on both sides", onsetsOf(f.r).length === of.length && near(onsetsOf(f.r)[1] - onsetsOf(f.r)[0], 250, 4));
     const g = await run(FX.DELAY, { 1: 80, 2: "off", 3: 0 }, { drums: one, ms: 1500 });
-    check(`  with FEEDBACK the echo repeats (${onsetsOf(g.l, 8, 0.01).length} hits)`, onsetsOf(g.l, 8, 0.01).length >= 4);
+    check(`  with FEEDBACK the echo repeats (${onsetsOf(g.l, 8, 0.006).length} hits)`, onsetsOf(g.l, 8, 0.006).length >= 4);
     const h = await run(FX.DELAY, { 1: 0, 2: "off", 3: 127 }, { drums: one, ms: 900 });
     const hl = onsetsOf(h.l), hr = onsetsOf(h.r);
     check(`  SPREAD (ping pong off): the right echo comes later, ${hr[1] !== undefined ? (hr[1] - hl[1]).toFixed(0) : "?"} ms after the left (half a step: 62)`, hl.length >= 2 && hr.length >= 2 && near(hr[1] - hl[1], 62.5, 6));
@@ -2009,7 +2009,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     return { highs: Math.sqrt(hi / (k1 - k0)), rms: Math.sqrt(tot / (k1 - k0)) };
   };
   const open = await echoHighs(false), shut = await echoHighs(true);
-  check(`a DELAY echo that comes on a LOW PASS step is filtered (its highs ${open.highs.toFixed(4)} without, ${shut.highs.toFixed(4)} with)`, open.highs > 0.001 && shut.highs < open.highs * 0.5);
+  check(`a DELAY echo that comes on a LOW PASS step is filtered (its highs ${open.highs.toFixed(4)} without, ${shut.highs.toFixed(4)} with)`, open.highs > 0.0004 && shut.highs < open.highs * 0.5);
 }
 // ---- the effects follow the section that plays: a step of an effect set in the second section opens it there (and not in the first)
 {

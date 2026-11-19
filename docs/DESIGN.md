@@ -110,7 +110,7 @@ The keys are in the order of the signal, except the two filters. HALFTIME, BITCR
 
 **Second page, the same for every effect**: ATTACK, RELEASE, CONTINUOUS (on at every step, and while stopped), MIX (that effect's share).
 
-**Where a step starts**: its mix is 100 % for every effect (SELECT moves it). The DELAY's and the REVERB's amount is their own MIX (page 2, KNOB 4), which starts at 50 % for the delay and 20 % for the reverb (whose SIZE and WIDTH start at 20 % too: a short, narrow room; an older save keeps the 30 % it had), the others' at 100 %: it is the amount of the whole effect, not of each step. (A save from before, with the steps at 50 and 30, is read into this: those steps become 100 and the MIX 50 and 30 %; steps set by hand stay.)
+**Where a step starts**: its mix is 100 % for every effect (SELECT moves it). The DELAY's and the REVERB's amount is their own MIX (page 2, KNOB 4), which starts at 40 % for the delay (its echo is at half the send's level, -6 dB: it was 3/4, and the echoes stood out) and 20 % for the reverb (whose SIZE and WIDTH start at 20 % too: a short, narrow room; an older save keeps the 30 % it had), the others' at 100 %: it is the amount of the whole effect, not of each step. (A save from before, with the steps at 50 and 30, is read into this: those steps become 100 and the MIX 50 and 30 %; steps set by hand stay.)
 
 **The envelope**: a step that is on opens the effect through its attack, a step that is off closes it through its release. Steps in a row do not retrigger: **the attack is on the first step of the run and the release after the last**. The amount at any moment is that envelope x the step's own mix (SELECT) x the effect's MIX x the global FX MIX (GLO page 2, KNOB 2).
 

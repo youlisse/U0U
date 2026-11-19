@@ -40,7 +40,7 @@ static const uint8_t DBX_FX_ATKREL[DBX_NFX][2] = {{10, 40}, {2, 16}, {2, 16}, {4
                                                   {4, 20}, {0, 60}, {2, 16}};
 /* the mix a step of each effect starts at (SELECT moves it): the sends are placed at a good level, not full */
 static const uint8_t DBX_FX_STEPMIX[DBX_NFX] = {100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100};   /* a step starts at full: the amount is the effect's MIX */
-static const uint8_t DBX_FX_MIXDEF[DBX_NFX] = {127, 127, 127, 127, 127, 127, 127, 64, 127, 26, 127};      /* ... the delay's at 50 %, the reverb's at 20 % */
+static const uint8_t DBX_FX_MIXDEF[DBX_NFX] = {127, 127, 127, 127, 127, 127, 127, 51, 127, 26, 127};      /* ... the delay's at 40 %, the reverb's at 20 % */
 static const char *const DBX_DTIME_NAME[6] = {"1/16", "1/8", "3/16", "1/4", "3/8", "1/2"};
 static const uint8_t DBX_DTIME_NUM[6] = {1, 2, 3, 4, 6, 8};                    /* in quarters of a beat */
 
@@ -475,8 +475,8 @@ static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
         dly_buf[1][dly.w] = (int16_t)dbx_c16(wr);
         if (++dly.w >= DLY_LEN)
             dly.w = 0;
-        l[i] += (ol * 3) >> 2;
-        r[i] += (or_ * 3) >> 2;
+        l[i] += ol >> 1;                               /* (the echo at half the line's level: -6 dB under the send; it was 3/4, and the echoes stood out) */
+        r[i] += or_ >> 1;
         if ((uint32_t)(rl < 0 ? -rl : rl) > pk)
             pk = (uint32_t)(rl < 0 ? -rl : rl);
         if ((uint32_t)(rr < 0 ? -rr : rr) > pk)
