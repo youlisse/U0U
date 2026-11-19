@@ -1946,6 +1946,12 @@ static void dbx_draw_help_page(void)
     lcd_fill(0, y - 2u, 240, 240u - (y - 2u), T_BG);                 /* (the lines of the sheet before) */
     draw_text_line(12, TITLE_Y, 216, &AF_L, HELP_TITLE[dbx_help], T_THEME, T_BG, 0);
     draw_text_line(196, TITLE_Y + 10u, 32, &AF_S, dbx_help == 0u ? "1/3" : dbx_help == 1u ? "2/3" : "3/3", T_MID, T_BG, 2);
+#ifdef FELUCCA_ID                                                   /* (the FM-1: when this image was compiled, beside the sheet's number, on all three sheets) */
+    {
+        char t[6] = {__TIME__[0], __TIME__[1], ':', __TIME__[3], __TIME__[4], 0};
+        draw_text_line(150, TITLE_Y + 10u, 40, &AF_S, t, T_MID, T_BG, 2);
+    }
+#endif
     for (n = 0; n < 13u; n++) {
         if (HELP_L[dbx_help][n][0] == 0 && HELP_T[dbx_help][n][0] == 0)
             continue;

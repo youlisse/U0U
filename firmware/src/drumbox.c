@@ -24,7 +24,7 @@
 #define FELUCCA_ID "FM-1_2100003" /* package identity (build.py: the .fwsc marker string): 210 (U0U) and the version (0003: 0.3), free on the hub's identity check */
 #endif
 #ifndef FELUCCA_STAMP
-#define FELUCCA_STAMP "  " __TIME__    /* when this image was compiled: the second help sheet shows it, so a flashed build can be told from the one before it (the version stays the same) */
+#define FELUCCA_STAMP "  " __TIME__    /* (the hour, minute and second: the title row of every sheet shows the hour and minute) when this image was compiled: the second help sheet shows it, so a flashed build can be told from the one before it (the version stays the same) */
 #endif
 #ifndef FELUCCA_VERSION
 #define FELUCCA_VERSION "v0.3"
