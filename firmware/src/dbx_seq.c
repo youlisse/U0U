@@ -51,7 +51,7 @@ static struct {
     uint8_t pe;                            /* the pattern the UI shows and edits */
     uint8_t vs;                            /* ... and its section (0, 1): OCT-, OCT+; what plays does not follow it */
     uint16_t two;                          /* bit p: the pattern has a second section (the data of p + 16): it plays after the first */
-    volatile uint8_t ps, cs;               /* the section that comes next, the one playing (ISR) */
+    volatile uint8_t ps, cs, cp;           /* the section that comes next; the section and the pattern of the step playing (ISR: the effects follow them) */
     volatile uint8_t pp;                   /* the pattern that plays */
     volatile uint8_t pq;                   /* the one that plays from the next pass (255: none) */
     uint16_t bpm;                          /* the tempo: ours, or measured from the computer's clock */
@@ -210,7 +210,7 @@ static void dbx_seq_init(void)
     dbx_seq.rnd = 0x2545F491u;
     dbx_seq_tempo();
     dbx_seq.two = 0;
-    dbx_seq.vs = dbx_seq.ps = dbx_seq.cs = 0;
+    dbx_seq.vs = dbx_seq.ps = dbx_seq.cs = dbx_seq.cp = 0;
     for (p = 0; p < DBX_NVP; p++)
         dbx_pat_empty(p);
 }
@@ -635,7 +635,7 @@ static void dbx_seq_step(int32_t tb_q8)
         l = 1u;
     int32_t len = (int32_t)dbx_seq.step_q8;
     const dbx_pat_t *ps = DBX_PATV((uint32_t)dbx_seq.pp + DBX_NPAT * dbx_seq.ps), *pn;
-    uint32_t csec = dbx_seq.ps;                     /* the section the step now belongs to */
+    uint32_t csec = dbx_seq.ps, cpat = dbx_seq.pp;  /* the section and the pattern the step now belongs to */
     dbx_seq.tl = (uint8_t)((dbx_seq.tl + 1u) % DBX_NSTEP);
     if (dbx_seq.rep && !held)                       /* let go: the step now was the loop's, the one after is the pattern's */
         dbx_seq.rep = 0;
@@ -652,6 +652,7 @@ static void dbx_seq_step(int32_t tb_q8)
                      : (dbx_seq.tl + 1u) % DBX_NSTEP;
     dbx_seq.cur = (uint8_t)s;
     dbx_seq.cs = (uint8_t)csec;
+    dbx_seq.cp = (uint8_t)cpat;
     dbx_seq.nxq = (uint8_t)nx;
     dbx_seq.steps_done++;
     dbx_lfo_sync(++dbx_seq.pos);                    /* (0 at the first step after a start) */

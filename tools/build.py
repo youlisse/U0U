@@ -56,7 +56,7 @@ NAME = "u0u"
 ROOT = "drumbox.c"
 GEN_ALL = False
 LD = FW / "drumbox.ld"              # the memory map (Felucca's: app.ld)
-PRODUCT = "FM-1_2100002"            # package identity (U0U: 210 and the version, 0001 for 0.1, 0002 for 0.2; free on thefirmwarehub.com's identity check); Felucca: FM-1_900
+PRODUCT = "FM-1_2100003"            # package identity (U0U: 210 and the version, 0001 for 0.1, 0002 for 0.2, 0003 for 0.3; free on thefirmwarehub.com's identity check); Felucca: FM-1_900
 VERSION = None                      # FELUCCA_VERSION for release builds (default: the root file's)
 # FELUCCA_CPU2 (firmware/src/felucca.c), unset or 1, the default (1.6.1): the second core is built in, its entry and
 # stacks (firmware/bsp/chip/fm1_cpu1.S) linked and its waiting loop (.c1_text) checked; MENU > SYSTEM > 2ND CORE starts it

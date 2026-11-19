@@ -657,13 +657,14 @@ static void dbx_master_process(int32_t *l, int32_t *r, uint32_t n)
  * attack going up and the release going down; the amount is that x the effect's MIX x the global FX MIX */
 static void dbx_fx_amounts(int32_t *a0, int32_t *a1)
 {
-    uint32_t e, cur = dbx_seq.cur, pp = dbx_seq.pp, playing = dbx_seq.playing;
+    uint32_t e, cur = dbx_seq.cur, playing = dbx_seq.playing;
+    const dbx_fxpat_t *fp = DBX_FXV((uint32_t)dbx_seq.cp + DBX_NPAT * dbx_seq.cs);       /* (the effects' steps of the section playing: the second one's too) */
     for (e = 0; e < DBX_NFX; e++) {
         int32_t tgt = 0, env = dbx_fx.env[e];
         if (dbx_fx.p[e][FP_CONT] >= 64u)
             tgt = 65536;
-        else if (playing && ((dbx_seq.fx[pp].on[e] >> cur) & 1u))
-            tgt = (int32_t)dbx_seq.fx[pp].mix[e][cur] * 65536 / 100;
+        else if (playing && ((fp->on[e] >> cur) & 1u))
+            tgt = (int32_t)fp->mix[e][cur] * 65536 / 100;
         if (tgt > env)
             env = env + dbx_fx.up[e] > tgt ? tgt : env + dbx_fx.up[e];
         else

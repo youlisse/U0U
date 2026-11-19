@@ -8,7 +8,7 @@
   firmware/u0u-VER.fwsc                          the package (+ LICENSE, LICENSING.md, LICENSES/: the package holds
                                                  JieLi SDK files under Apache-2.0, see LICENSING.md)
 
-  web/make_site.py build/u0u.fwsc 0.2 OUT_DIR [--repo https://github.com/USER/REPO] [--emu build/emu-drumbox]
+  web/make_site.py build/u0u.fwsc 0.3 OUT_DIR [--repo https://github.com/USER/REPO] [--emu build/emu-drumbox]
 
 The package must be one made by tools/fm1pkg_make.py (Felucca's own loader, no vendor files).
 Its identity (FM-1_ and 3 to 8 digits) is read from the package; the device must report it after the install.

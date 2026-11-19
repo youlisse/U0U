@@ -21,10 +21,10 @@
 #define FM1_CPU1 0
 #define FM1_CRASH_CTX_N 1u       /* chip/fm1_irq.h: the registers of the last crash only */
 #ifndef FELUCCA_ID
-#define FELUCCA_ID "FM-1_2100002" /* package identity (build.py: the .fwsc marker string): 210 (U0U) and the version (0002: 0.2), free on the hub's identity check */
+#define FELUCCA_ID "FM-1_2100003" /* package identity (build.py: the .fwsc marker string): 210 (U0U) and the version (0003: 0.3), free on the hub's identity check */
 #endif
 #ifndef FELUCCA_VERSION
-#define FELUCCA_VERSION "v0.2"
+#define FELUCCA_VERSION "v0.3"
 #endif
 #if FELUCCA_OTA && !FELUCCA_FLASH
 #error "FELUCCA_OTA needs FELUCCA_FLASH"

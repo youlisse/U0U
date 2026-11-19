@@ -1961,6 +1961,37 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const r = await device(w.flash()); r.render(300);
   check(`a doubled track is saved: after a restart it has its second section (${r.ex.web_two()}, step 5 ${r.ex.web_step_on(16, 0, 4)}, step 1 ${r.ex.web_step_on(16, 0, 0)})`, r.ex.web_two() === 1 && r.ex.web_step_on(16, 0, 4) === 1 && r.ex.web_step_on(16, 0, 0) === 0 && r.ex.web_step_on(0, 0, 0) === 1);
 }
+// ---- the effects follow the section that plays: a step of an effect set in the second section opens it there (and not in the first)
+{
+  const w = await device(); w.render(200);
+  w.key(BLACK[0], 20); w.setSteps([0]);                            // a kick on step 1 of the first section
+  w.btn(B.OCTUP); w.render(60); w.btn(B.OCTUP); w.render(60);      // doubled, the second section shown
+  w.btn(B.FX); w.key(BLACK[7], 30); w.key(WHITE[4], 30); w.btn(B.HOME);     // the DELAY on step 5 of the second section only
+  check("the DELAY has step 5 in the second section, none in the first", w.ex.web_fxstep(16, FX.DELAY, 4) === 1 && w.ex.web_fxstep(0, FX.DELAY, 4) === 0);
+  w.btn(B.OCTDN); w.render(60);                                    // the first section shown
+  w.btn(B.PLAY);
+  let openB = 0, openA = 0, secB = 0, secA = 0;
+  for (let t = 0; t < 6000; t += 10) {
+    w.render(10);
+    const env = w.ex.web_fxenv(FX.DELAY);
+    if (w.ex.web_cs() === 1) { secB++; if (env > 30000) openB++; }
+    else { secA++; if (env > 0) openA++; }
+  }
+  check(`the DELAY opens in the second section (${openB} of ${secB} looks), and stays shut in the first (${openA} of ${secA})`, openB > 3 && openA === 0 && secA > 100);
+  w.btn(B.PLAY);
+  // and the first section's steps do not open it in the second
+  const x = await device(); x.render(200);
+  x.key(BLACK[0], 20); x.setSteps([0]); x.btn(B.FX); x.key(BLACK[7], 30); x.key(WHITE[4], 30); x.btn(B.HOME);       // the DELAY on step 5 of the first section
+  x.btn(B.OCTUP); x.render(60); x.btn(B.OCTUP); x.render(60);      // doubled: the second one is a copy, the effects' steps too
+  check("a doubled track copies the effects' steps too", x.ex.web_fxstep(16, FX.DELAY, 4) === 1);
+  x.btn(B.FX); x.key(BLACK[7], 30); x.key(WHITE[4], 30); x.btn(B.HOME);       // ... off in the second
+  check("  and they are the section's own afterwards (off in the second, on in the first)", x.ex.web_fxstep(16, FX.DELAY, 4) === 0 && x.ex.web_fxstep(0, FX.DELAY, 4) === 1);
+  x.btn(B.PLAY);
+  let a1 = 0, b1 = 0;
+  for (let t = 0; t < 6000; t += 10) { x.render(10); const env = x.ex.web_fxenv(FX.DELAY); if (x.ex.web_cs() === 1 && env > 0) b1++; if (x.ex.web_cs() === 0 && env > 30000) a1++; }
+  check(`  the DELAY opens in the first section (${a1}) and never in the second (${b1})`, a1 > 3 && b1 === 0);
+  x.btn(B.PLAY);
+}
 // ---- deleting a pattern takes its second section with it, and the ones after it keep theirs
 {
   const w = await device(); w.render(200);

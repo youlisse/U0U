@@ -43,7 +43,7 @@ DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib JIELI_TOOLCHAIN=$HOME/.jieli/toolch
   AC79_SDK=$HOME/fw-AC79_AIoT_SDK python3 tools/build.py        # -> build/u0u.fwsc
 sh web/emu/build_drumbox.sh                                    # the browser build (needs Emscripten)
 node web/emu/drumbox_test.mjs                                  # the emulator's checks
-python3 web/make_site.py build/u0u.fwsc 0.2 site              # the site: emulator, installer, package
+python3 web/make_site.py build/u0u.fwsc 0.3 site              # the site: emulator, installer, package
 ```
 
 `firmware/src/drumbox.c` (with `dbx_main.c`) is the root of the build, `firmware/drumbox.ld` its memory map. The design notes, with

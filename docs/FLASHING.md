@@ -23,7 +23,7 @@ DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib JIELI_TOOLCHAIN=$HOME/.jieli/toolch
   AC79_SDK=$HOME/fw-AC79_AIoT_SDK ~/.fm1-venv/bin/python tools/build.py        # colima must be running
 ```
 
-Writes `build/u0u.fwsc` (identity `FM-1_2100002`: 210 for U0U and 0002 for 0.2, free on the Firmware Hub's identity check), `build/u0u.bin` and the
+Writes `build/u0u.fwsc` (identity `FM-1_2100003`: 210 for U0U and 0003 for 0.3, free on the Firmware Hub's identity check), `build/u0u.bin` and the
 update loader. `--target felucca` builds the original firmware (`build/felucca.fwsc`) with the same tool.
 
 ## 2. Install
@@ -32,7 +32,7 @@ Web installer (Chrome or Edge, USB data cable, no other app on the FM-1's MIDI p
 (the page to try U0U in the browser is the root of the same site, with an "Install it on your FM-1" button). From a local copy:
 
 ```sh
-python3 web/make_site.py build/u0u.fwsc 0.2 site          # the emulator at /, the installer at /install/, firmware/u0u-0.2.fwsc
+python3 web/make_site.py build/u0u.fwsc 0.3 site          # the emulator at /, the installer at /install/, firmware/u0u-0.3.fwsc
 python3 -m http.server 8793 -d site --bind 127.0.0.1      # http://localhost:8793/install/
 ```
 

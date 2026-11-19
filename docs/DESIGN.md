@@ -148,7 +148,7 @@ Felucca is one compilation unit (`firmware/src/felucca.c` includes every `.c` in
 
 ## Safety
 
-The OTA re-entry (`FELUCCA_OTA`, `ota_hw.c`) must stay, or a flashed DrumBox cannot be replaced over MIDI (see README, Flashing and safety). Package identity is `FM-1_2100002` (210 for U0U, 0002 for 0.2, 0001 was 0.1; free on the Firmware Hub's identity check; Felucca's is `FM-1_900`). Always back up the device first.
+The OTA re-entry (`FELUCCA_OTA`, `ota_hw.c`) must stay, or a flashed DrumBox cannot be replaced over MIDI (see README, Flashing and safety). Package identity is `FM-1_2100003` (210 for U0U, 0003 for 0.3, 0002 was 0.2, 0001 was 0.1; free on the Firmware Hub's identity check; Felucca's is `FM-1_900`). Always back up the device first.
 
 ## Milestones
 
@@ -164,7 +164,7 @@ The OTA re-entry (`FELUCCA_OTA`, `ota_hw.c`) must stay, or a flashed DrumBox can
    4. **Test on the real FM-1**: install from V15 and from another firmware, and leave U0U again. The hub lists nothing untested; the emulator does not count.
    5. **Identity and licence**: an `FM-1_` number nobody else uses (not `FM-1_900`, which is Felucca's; the hub has an "Is my identity free?" check), and the licence settled in the README (GPL-3.0).
    6. **GitHub**: a public repository with the source at the tag, and a release with the `.fwsc` attached (the hub picks new releases up within three hours).
-   7. **A page to try it and to install it, on GitHub Pages**: one site, `site/` in the repository (`python3 web/make_site.py build/u0u.fwsc 0.2 site --repo https://github.com/youlisse/U0U`, after `web/emu/build_drumbox.sh`): the emulator at the root (`index.html`, `felucca.wasm`, `worklet.js`, `fonts/`, with an "Install it on your FM-1" button), the installer at `install/` (self-contained, it fetches `firmware/u0u-0.2.fwsc`, which travels with the licences). Published from the `gh-pages` branch, which holds `site/` as its root: `tools/publish_pages.sh` (`git subtree push --prefix site origin gh-pages`). The root is the `play` link of `fmhub.json`.
+   7. **A page to try it and to install it, on GitHub Pages**: one site, `site/` in the repository (`python3 web/make_site.py build/u0u.fwsc 0.3 site --repo https://github.com/youlisse/U0U`, after `web/emu/build_drumbox.sh`): the emulator at the root (`index.html`, `felucca.wasm`, `worklet.js`, `fonts/`, with an "Install it on your FM-1" button), the installer at `install/` (self-contained, it fetches `firmware/u0u-0.3.fwsc`, which travels with the licences). Published from the `gh-pages` branch, which holds `site/` as its root: `tools/publish_pages.sh` (`git subtree push --prefix site origin gh-pages`). The root is the `play` link of `fmhub.json`.
    8. **A demo video**: U0U playing on the real FM-1 (a beat on the white keys, the drums on the black ones, an effect placed on steps, EDIT per step, a pattern chain), short, hosted by a video site; its link goes in the email (the hub takes optional video links) and in the README.
    9. **`fmhub.json`** at the repository root: `what` (plain English, 300 characters at most, no links), `kinds` (`drums`), `author`, `play` (the page to try it), and a square `image` (240 to 1024 px, PNG, WebP or JPEG, 300 KB at most).
    10. **The email** to zven@thefirmwarehub.com, with links and no attachments (name, author, repository, `FM-1_` number, licence, what it does, picture, the page to try it, the video, tested on a real FM-1): sent by the user, never by Claude.
