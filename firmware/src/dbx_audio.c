@@ -27,7 +27,7 @@ static struct {
 } dbx_audio = {2048, 4092, 2048 * 4092 / 4096, 0};
 
 static uint32_t dbx_vol_q12(uint32_t v) { return (v * v * 419u) >> 10; }     /* v 0..127: square law, 100 = unity */
-static inline uint32_t dbx_master_of_pot(uint32_t k10) { return (k10 * k10) >> 8; }   /* as fx.c master_of_pot */
+static inline uint32_t dbx_master_of_pot(uint32_t k10) { return (k10 * k10 * 181u) >> 16; }   /* the MASTER pot, a square law that tops at -3 dB (2890 of 4096): a loop that sits near 0 dBFS gets 3 dB of room for what the effects add (a delay adds 1 to 4 dB), as fx.c master_of_pot (which tops at unity) */
 
 static void dbx_mix_block(int32_t *out, uint32_t n)       /* n <= CTL stereo frames, Q15 */
 {

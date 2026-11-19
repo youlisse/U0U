@@ -1491,12 +1491,12 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   };
   const off = await loud(0, 20), on = await loud(64, 20), plain = await loud(0, 0);
   const pk = (c) => Math.max(peakOf(c.l), peakOf(c.r));
-  check(`soft clip off, pushed (volume 127): the peak is 0 dBFS, flat, and no more (${pk(off).toFixed(5)})`, pk(off) > 0.9999 && pk(off) <= 1.0);
-  check(`soft clip on (+18 dB): the same ceiling, 0 dBFS, whatever the gain (${pk(on).toFixed(5)})`, pk(on) > 0.9999 && pk(on) <= 1.0);
+  check(`soft clip off, pushed (volume 127): the peak comes up to the ceiling and does not pass it (${pk(off).toFixed(5)})`, pk(off) > 0.9 && pk(off) <= 1.0);
+  check(`soft clip on (+18 dB): the same ceiling, whatever the gain (${pk(on).toFixed(5)})`, pk(on) > 0.9 && pk(on) <= 1.0);
   check(`  the sound is fuller with it, the ceiling is the same (RMS ${rms(on.l).toFixed(3)} against ${rms(off.l).toFixed(3)})`, rms(on.l) > rms(off.l) * 1.05);
   check(`  and a sound that does not reach it is left alone (volume 100: peak ${pk(plain).toFixed(3)})`, pk(plain) <= 1.0);
   const flat = (c) => c.l.filter((x) => Math.abs(x) > 0.9999).length;
-  check(`soft clip off: the peaks are flat at the ceiling (${flat(off)} samples at 0 dBFS)`, flat(off) > 20);
+  check(`soft clip off: the peaks are bent by the limiter's knee, none is cut flat at 0 dBFS (${flat(off)} samples there)`, flat(off) === 0);
   const quiet = async () => { const w = await device(); w.render(200); w.key(BLACK[7], 30); w.setSteps([0]); w.render(300); w.ex.web_buttons(1 << B.PLAY); const c = w.cap(300); w.ex.web_buttons(0); return c; };
   const q0 = await quiet(), q1 = await quiet();
   check("the same gestures give the same samples (the limiter has no memory)", q0.l.every((x, i) => x === q1.l[i]));
@@ -1975,6 +1975,23 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const r = await device(w.flash()); r.render(300);
   check(`a doubled track is saved: after a restart it has its second section (${r.ex.web_two()}, step 5 ${r.ex.web_step_on(16, 0, 4)}, step 1 ${r.ex.web_step_on(16, 0, 0)})`, r.ex.web_two() === 1 && r.ex.web_step_on(16, 0, 4) === 1 && r.ex.web_step_on(16, 0, 0) === 0 && r.ex.web_step_on(0, 0, 0) === 1);
 }
+// ---- headroom: a drum loop with a feedback DELAY, the MASTER pot at its top, does not reach 0 dBFS (the delay adds 1 to 4 dB: it was over, and crackled)
+{
+  const loop = async (delayFb) => {
+    const w = await device(); w.render(200);
+    w.key(BLACK[0], 20); w.setSteps([0, 4, 8, 12]);
+    w.key(BLACK[1], 20); w.setSteps([4, 12]);
+    w.key(BLACK[3], 20); w.setSteps([2, 6, 10, 14]);
+    if (delayFb !== null) { w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME); w.fxSet(FX.DELAY, 1, delayFb); w.btn(B.HOME); }
+    w.ex.web_master(1023);                                           // MASTER at the top
+    w.btn(B.PLAY); w.render(1500);
+    const c = w.cap(4000); let pk = 0, over = 0;
+    for (const x of c.l) { const a = Math.abs(x); if (a > pk) pk = a; if (a > 0.9999) over++; }
+    return { pk, over };
+  };
+  const plain = await loop(null), dly = await loop(127);
+  check(`MASTER at the top: the loop peaks at ${plain.pk.toFixed(3)}, with a delay at full feedback ${dly.pk.toFixed(3)}: below 0 dBFS, nothing cut (${dly.over} samples at the ceiling)`, plain.pk < 0.9 && dly.pk < 0.97 && dly.over === 0);
+}
 // ---- the filters (LOW PASS, BAND PASS) come last: a filter on the step where an echo comes shapes the echo too (it sat ahead of the delay, which echoed the unfiltered sound)
 {
   const echoHighs = async (withLp) => {
@@ -2152,7 +2169,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     };
     const none = await run(1), fx = await run(0), both = await run(2);
     const tail = mean(none, 30, 45);
-    check(`TARGET EFFECTS: the reverb's tail falls on the kick (${dip(fx).toFixed(4)} against ${tail.toFixed(4)} before it; the dry target leaves it, ${dip(none).toFixed(4)})`, tail > 0.002 && dip(fx) < dip(none) * 0.4);
+    check(`TARGET EFFECTS: the reverb's tail falls on the kick (${dip(fx).toFixed(4)} against ${tail.toFixed(4)} before it; the dry target leaves it, ${dip(none).toFixed(4)})`, tail > 0.001 && dip(fx) < dip(none) * 0.4);
     check(`  BOTH ducks it too (${dip(both).toFixed(4)})`, dip(both) < dip(none) * 0.4);
   }
   // page 2: the attack, the decay, the gate (a hit's samples from its first one)
