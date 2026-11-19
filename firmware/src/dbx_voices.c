@@ -61,6 +61,7 @@ typedef struct {
     uint16_t vg;                           /* the last hit's velocity as a gain, Q12 (dbx_vel_gain) */
     int8_t semi;                           /* the last hit's pitch, in semitones from the lane's TUNE (a step's PITCH) */
     uint8_t mute;
+    uint8_t sd, sr;                        /* the lane's sends to the DELAY and to the REVERB, 0..15 (15: all of it, the way every lane starts) */
     int8_t pan;                            /* -32 (left) .. +32 (right): the lane's place in the stereo field (ALGORITHM, EDIT page 2) */
     dbx_hk_t hk;                           /* the last hit's own settings (its step's, EDIT 2): added to the lane's */
     uint8_t choked;                        /* a hit of its group has cut it: it fades out in two blocks (1.5 ms) and stops */
@@ -96,6 +97,7 @@ static void dbx_kit_apply(uint32_t kit, uint32_t reset)
             l->p.level = lvl;
         if (reset) {
             l->mute = 0;
+            l->sd = l->sr = 15;
             l->pan = 0;
             l->choke = DBX_CHOKE_DEF[i];
         }
@@ -127,6 +129,7 @@ static void dbx_voices_init(void)
         l->vg = dbx_vel_gain(DBX_VEL_DEF);
         l->semi = 0;
         l->mute = 0;
+        l->sd = l->sr = 15;
         l->pan = 0;
         l->choke = DBX_CHOKE_DEF[i];
     }
@@ -238,7 +241,7 @@ static void dbx_pan_gains(int32_t p, int32_t *gl, int32_t *gr)
 }
 
 /* adds the lanes' block (n <= CTL) into mix (the middle: what the mono effects take) and side (what a pan adds: left = mix + side, right = mix - side), Q15 */
-static void dbx_voices_render(int32_t *mix, int32_t *side, uint32_t n)
+static void dbx_voices_render(int32_t *mix, int32_t *side, int32_t *ds, int32_t *rs, uint32_t n)
 {
     int32_t y[CTL], o[CTL];
     uint32_t i, k;
@@ -304,6 +307,12 @@ static void dbx_voices_render(int32_t *mix, int32_t *side, uint32_t n)
                     int32_t g = ga + (gb - ga) * (int32_t)(k + 1u) / (int32_t)n;
                     o[k] = ((y[k] * g >> 12) * (int32_t)l->vg) >> 12;     /* (|y| x g <= 32179 x 12224: 32 bits) */
                 }
+            if (l->sd)                                         /* the sends: the lane's own sound, mono, as much of it as the lane sends */
+                for (k = 0; k < n; k++)
+                    ds[k] += o[k] * (int32_t)l->sd / 15;
+            if (l->sr)
+                for (k = 0; k < n; k++)
+                    rs[k] += o[k] * (int32_t)l->sr / 15;
             pan = clamp((int32_t)l->pan + l->hk.lp, -32, 32);   /* (the lane's, and the step's own) */
             if (pan == 0)
                 for (k = 0; k < n; k++)
