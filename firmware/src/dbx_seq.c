@@ -155,9 +155,14 @@ static void dbx_touch_lk(void) { dbx_store.pats |= dbx_seq.vs ? 0x2000u : 0x20u;
 static void dbx_touch_lk2(void) { dbx_store.pats |= dbx_seq.vs ? 0x4000u : 0x80u; dbx_store.t_ms = fm1_ms; }   /* (the steps' own EXTRA and PAN: theirs) */
 static void dbx_touch_fx(void) { dbx_store.pats |= 0x50u | (dbx_seq.vs ? 0x1000u : 0u); dbx_store.t_ms = fm1_ms; }   /* (0x10 the effects' object: parameters and the first sections' steps, 0x40 the sound) */
 static void dbx_touch_pat(uint32_t v) { dbx_store.pats |= (uint16_t)(v < DBX_NPAT ? 1u << (v / 4u) : 0x100u << ((v - DBX_NPAT) / 4u)); dbx_store.t_ms = fm1_ms; }
-static void dbx_touch_all_sec(void)        /* a second section made, removed or moved: everything it is kept in, and the flags of the first objects */
+static void dbx_touch_two(uint32_t p)       /* the flags of the second sections are in the first objects' spare word: the object of pattern p */
 {
-    dbx_store.pats |= (uint16_t)(DBX_SEC_BITS | 0x0Fu | 0x10u | 0x20u | 0x80u);
+    dbx_store.pats |= (uint16_t)(1u << (p / 4u));
+    dbx_store.t_ms = fm1_ms;
+}
+static void dbx_touch_secdata(uint32_t p)   /* the data of pattern p's second section: its object, the effects' steps, the steps' own values (each write erases a sector: no more than that) */
+{
+    dbx_store.pats |= (uint16_t)((0x100u << (p / 4u)) | 0x7000u);
     dbx_store.t_ms = fm1_ms;
 }
 
@@ -275,9 +280,12 @@ static void dbx_pat_copy(uint32_t src, uint32_t dst)      /* a pattern copied wi
     } else
         dbx_seq.two &= (uint16_t)~(1u << dst);
     dbx_arp_copy(src, dst);
-    dbx_touch_all_sec();
+    dbx_touch_two(dst);
+    if ((dbx_seq.two >> dst) & 1u)
+        dbx_touch_secdata(dst);
     dbx_touch_pat(dst);
-    dbx_touch_fx();
+    dbx_store.pats |= 0x10u | 0x20u | 0x80u;           /* (the effects' object, the steps' own values: the first sections') */
+    dbx_store.t_ms = fm1_ms;
 }
 
 static void dbx_seq_flush(uint32_t mask);
@@ -289,7 +297,8 @@ static void dbx_sec_double(uint32_t p)
         return;
     dbx_data_copy(p, p + DBX_NPAT);
     dbx_seq.two |= (uint16_t)(1u << p);
-    dbx_touch_all_sec();
+    dbx_touch_two(p);
+    dbx_touch_secdata(p);
 }
 
 /* ... and taken away again (OCT-, twice, from the first section): the second one's data is a new pattern's again */
@@ -301,14 +310,14 @@ static void dbx_sec_remove(uint32_t p)
     dbx_pat_empty(p + DBX_NPAT);
     if (p == dbx_seq.pp)
         dbx_seq_flush(0xFFFFu);                          /* (what was queued of it does not play) */
-    dbx_touch_all_sec();
+    dbx_touch_two(p);                                    /* (the flag: the data is left in the flash, nothing reads it without it) */
 }
 
 /* a pattern deleted (with its second section): the ones after it move down by one and the 16th is a new one; the song loses its slots of it and its
  * numbers follow; the one shown stays at its number (it now shows the next). What plays follows its pattern (the one deleted: the next, as its place is taken) */
 static void dbx_pat_delete(uint32_t p)
 {
-    uint32_t q, w, b;
+    uint32_t q, w, b, had = (uint32_t)dbx_seq.two >> p;    /* (a second section among the ones that move: they are written again too) */
     if (p >= DBX_NPAT)
         return;
     if (p == dbx_seq.pp)
@@ -355,10 +364,13 @@ static void dbx_pat_delete(uint32_t p)
         dbx_song.pat[w] = 255;
         dbx_song.rep[w] = dbx_song.again[w] = 0;
     }
-    for (q = p; q < DBX_NPAT; q++)
+    for (q = p; q < DBX_NPAT; q++) {
         dbx_touch_pat(q);
-    dbx_touch_all_sec();
-    dbx_touch_fx();
+        dbx_touch_two(q);
+        if (had)
+            dbx_touch_secdata(q);
+    }
+    dbx_store.pats |= 0x10u | 0x20u | 0x80u;             /* (the effects' object, the steps' own values) */
     dbx_touch_set();                                     /* (the song is saved with the sound) */
 }
 

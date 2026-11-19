@@ -1933,6 +1933,20 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   oct(false);
   check("  and OCT- does nothing again", w.ex.web_oct_ask() === 0);
 }
+// ---- doubling or taking a section away writes few flash objects (each erase stops the audio and the key scan for a moment: the keys' LEDs blink)
+{
+  const w = await device(); w.render(200);
+  w.key(BLACK[0], 20); w.setSteps([0, 8]); w.render(4000);
+  const n0 = w.ex.web_flash_writes_count();
+  w.btn(B.OCTUP); w.render(60); w.btn(B.OCTUP); w.render(60);
+  w.render(5000);
+  const n1 = w.ex.web_flash_writes_count();
+  check(`doubling a track writes ${n1 - n0} flash operations (five objects: the second section's pattern, effects' steps and own values, and the flags in the first object; fourteen was ~200)`, n1 - n0 >= 17 && n1 - n0 <= 100 && w.ex.web_dirty() === 0);
+  w.btn(B.OCTDN); w.render(60); w.btn(B.OCTDN); w.render(60); w.btn(B.OCTDN); w.render(60);
+  w.render(5000);
+  const n2 = w.ex.web_flash_writes_count();
+  check(`taking it away writes ${n2 - n1} operations (one object: the flag)`, n2 - n1 >= 1 && n2 - n1 <= 20 && w.ex.web_two() === 0 && w.ex.web_dirty() === 0);
+}
 // ---- a doubled track plays its first section, then its second, and goes round; the section shown is the one that is edited, whatever plays
 {
   const w = await device(); w.render(200);
