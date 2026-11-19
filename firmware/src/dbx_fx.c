@@ -431,19 +431,18 @@ static void fx_flanger(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a
 }
 
 /* -------------------------------------------------------------- DELAY --- */
-/* A tempo-synced stereo delay, written from nothing. The send (the effect's amount: the step's and the MIX) feeds the mono sum into a line; the echoes come back
- * at half the line's level and run on after the effect closes. PING PONG on: the echoes alternate left and right, SPREAD is how far apart; off: the same echo
- * on both sides, the right one SPREAD later (up to half a step). The feedback goes through a fixed gentle low-pass and a soft knee (a line this size cannot take
- * what a busy mix with feedback asks of it, and a hard clamp in a loop folds).
- * Its level: the send is scaled by sqrt((1 - FEEDBACK^2) (1 - FEEDBACK)): the echoes of a sound that does not repeat add the same energy whatever the feedback
- * (the first factor: more of it only makes them last), and those of a sound that repeats on the delay's own time (a kick on every step) pile up in step, which
- * the second factor takes back. The dry sound comes down a little as the send goes up (DLY_DRY, at most 1.5 dB), so the delay makes the whole no louder. Nothing here changes the gain of the whole
- * sound from block to block. The time glides (a tempo change bends the echoes, as a tape does) and is read with a linear interpolation: no clicks. */
+/* Felucca's tempo delay (fx.c fx_buses), the one that runs on the FM-1, taken as it is: an integer delay in a 16-bit line at half level, read at `dl`; a one-pole
+ * low-pass in the feedback (Felucca's COLR 70: 18800 / 32768); the new sample is the input at half level plus the filtered echo times the feedback, clamped to
+ * 16 bits (FEEDBACK 0..127 is Felucca's x 230); the echo comes out doubled. Felucca's is one mono line: here two, a side each, for PING PONG (the echoes cross
+ * from one line to the other, SPREAD how far apart they come out) and, off, the right line later by SPREAD (up to half a step).
+ * Only its level is U0U's: the send (the effect's amount, the step's and the MIX) is the mean of the two sides at it, scaled by sqrt((1 - FEEDBACK^2) (1 - FEEDBACK))
+ * so that a high feedback does not make a loop louder (a kick on every step is an echo that lands on the next: they pile up in step), and the dry comes down
+ * at most 1.5 dB at the full send. Measured on the emulator: a loop with the delay open on every step is within 0.6 dB of the same loop without it. */
 #define DLY_LEN 49152u
-#define DLY_TONE_K 2077                                /* the feedback's one-pole, Q12 (about half open) */
-#define DLY_DRY 80                                     /* how far the dry comes down at the full send: 80 / 256 of the echoes' energy (Q8) */
-static int16_t dly_buf[2][DLY_LEN] __attribute__((section(".pool")));      /* the line, at half the level: the chain above it runs to four times an int16 */
-static struct { uint32_t w; int32_t dt[2], flp[2], act; } dly;               /* (dt: the delay in samples, Q8) */
+#define DLY_COL 18800                                  /* Felucca's COLR 70: 2000 + 70 * 240, Q15 */
+#define DLY_DRY 80                                     /* how far the dry comes down at the full send: 80 / 256 of the square of the send (Q8) */
+static int16_t dly_buf[2][DLY_LEN] __attribute__((section(".pool")));
+static struct { uint32_t w; int32_t lp[2], act; } dly;
 
 static inline uint32_t dly_isqrt(uint32_t x)                                      /* the integer square root */
 {
@@ -461,65 +460,43 @@ static inline uint32_t dly_isqrt(uint32_t x)                                    
     return r;
 }
 
-static inline int32_t dly_read(const int16_t *b, uint32_t w, int32_t dq)   /* the line as it was dq / 256 samples ago, at full level */
-{
-    uint32_t di = (uint32_t)dq >> 8, i0 = w >= di ? w - di : w + DLY_LEN - di, i1 = i0 == 0u ? DLY_LEN - 1u : i0 - 1u;
-    int32_t fr = dq & 255;
-    return ((b[i0] * (256 - fr) + b[i1] * fr) >> 8) * 2;
-}
-
 static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
 {
     const uint8_t *p = dbx_fx.p[FX_DELAY];
-    uint32_t i, ch, opt = dbx_opt(p[0], 6u), tgt = dbx_beat_samples() * DBX_DTIME_NUM[opt] / 4u, pk = 0, pong = p[2] >= 64u;
-    int32_t a = a0, da = (a1 - a0) / (int32_t)n, fb = (int32_t)p[1] * 29000 / 127, sp = p[3], tq[2], f2 = (fb * fb) >> 15, nf, ae;
+    uint32_t i, dl = dbx_beat_samples() * DBX_DTIME_NUM[dbx_opt(p[0], 6u)] / 4u, dr, pong = p[2] >= 64u, pk = 0;
+    int32_t a = a0, da = (a1 - a0) / (int32_t)n, fb = (int32_t)p[1] * 230, f2 = (fb * fb) >> 15, sp = p[3], nf, ae, d, w2;
     if (a0 == 0 && a1 == 0 && dly.act < 8)
         return;
-    nf = (int32_t)dly_isqrt((uint32_t)(((32768 - f2) * (32768 - fb)) >> 15) << 15);   /* sqrt((1 - fb^2) (1 - fb)), Q15 */
-    if (tgt > DLY_LEN - 2u - 4096u)
-        tgt = DLY_LEN - 2u - 4096u;
-    if (tgt < 64u)
-        tgt = 64u;
-    tq[0] = (int32_t)tgt << 8;
-    tq[1] = ((int32_t)tgt + (pong ? 0 : (int32_t)(dbx_step_samples() / 2u) * sp / 127)) << 8;   /* off: the right side later */
-    for (ch = 0; ch < 2u; ch++)
-        if (dly.dt[ch] == 0)
-            dly.dt[ch] = tq[ch];
+    nf = (int32_t)dly_isqrt((uint32_t)(((32768 - f2) * (32768 - fb)) >> 15) << 15);     /* sqrt((1 - fb^2) (1 - fb)), Q15 */
+    dl = dl < 16u ? 16u : dl > DLY_LEN - 2u - 4096u ? DLY_LEN - 2u - 4096u : dl;
+    dr = dl + (pong ? 0u : (uint32_t)(dbx_step_samples() / 2u) * (uint32_t)sp / 127u);          /* off: the right side later */
     for (i = 0; i < n; i++, a += da) {
-        int32_t x = l[i], y = r[i], rl, rr, fl_, fr_, wl, wr, ol, or_, in, d, w2;
-        for (ch = 0; ch < 2u; ch++) {                                                  /* the time glides to its target (and gets there) */
-            int32_t e = tq[ch] - dly.dt[ch];
-            dly.dt[ch] += (e + (e >= 0 ? 1023 : -1023)) / 1024;
-        }
-        rl = dly_read(dly_buf[0], dly.w, dly.dt[0]);
-        rr = dly_read(dly_buf[1], dly.w, dly.dt[1]);
-        fl_ = dbx_lp1(&dly.flp[0], rl, DLY_TONE_K);
-        fr_ = dbx_lp1(&dly.flp[1], rr, DLY_TONE_K);
+        uint32_t w = dly.w, il = w >= dl ? w - dl : w + DLY_LEN - dl, ir = w >= dr ? w - dr : w + DLY_LEN - dr;
+        int32_t x = l[i], y = r[i], xl = dly_buf[0][il], xr = dly_buf[1][ir], in, ol, or_, wl, wr;
+        dly.lp[0] += ((xl - dly.lp[0]) * DLY_COL) >> 15;
+        dly.lp[1] += ((xr - dly.lp[1]) * DLY_COL) >> 15;
         ae = ((a >> 4) * nf) >> 15;                                                   /* the send, Q12 */
         in = ((((x + y) >> 1) >> 3) * ae) >> 9;                                       /* (the mean of the two sides, at the send) */
         if (pong) {                                                                   /* the input in the left line, each echo into the other */
-            wl = in + ((fr_ * fb) >> 15);
-            wr = (fl_ * fb) >> 15;
-            ol = ((rl + rr) >> 1) + (((rl - rr) >> 1) * sp) / 127;                    /* SPREAD: from the middle to apart */
-            or_ = ((rl + rr) >> 1) - (((rl - rr) >> 1) * sp) / 127;
+            wl = (in >> 1) + ((dly.lp[1] * fb) >> 15);
+            wr = (dly.lp[0] * fb) >> 15;
+            ol = ((xl + xr) >> 1) + (((xl - xr) >> 1) * sp) / 127;                    /* SPREAD: from the middle to apart */
+            or_ = ((xl + xr) >> 1) - (((xl - xr) >> 1) * sp) / 127;
         } else {
-            wl = in + ((fl_ * fb) >> 15);
-            wr = in + ((fr_ * fb) >> 15);
-            ol = rl;
-            or_ = rr;
+            wl = (in >> 1) + ((dly.lp[0] * fb) >> 15);
+            wr = (in >> 1) + ((dly.lp[1] * fb) >> 15);
+            ol = xl;
+            or_ = xr;
         }
-        dly_buf[0][dly.w] = (int16_t)dbx_hard(dbx_limit((wl + 1) >> 1));
-        dly_buf[1][dly.w] = (int16_t)dbx_hard(dbx_limit((wr + 1) >> 1));
-        if (++dly.w >= DLY_LEN)
-            dly.w = 0;
+        dly_buf[0][w] = (int16_t)dbx_c16(wl);
+        dly_buf[1][w] = (int16_t)dbx_c16(wr);
+        dly.w = w + 1u >= DLY_LEN ? 0u : w + 1u;
         w2 = ((a >> 4) * (a >> 4)) >> 12;                                             /* the send squared, Q12 */
         d = 4096 - ((w2 * DLY_DRY) >> 8);                                             /* the dry's gain, Q12 */
-        l[i] = ((x >> 3) * d >> 9) + (ol >> 1);                                       /* (|x| up to 2^17: >> 3, x 2^12, >> 9 keeps 32 bits) */
-        r[i] = ((y >> 3) * d >> 9) + (or_ >> 1);
-        if ((uint32_t)(rl < 0 ? -rl : rl) > pk)
-            pk = (uint32_t)(rl < 0 ? -rl : rl);
-        if ((uint32_t)(rr < 0 ? -rr : rr) > pk)
-            pk = (uint32_t)(rr < 0 ? -rr : rr);
+        l[i] = ((x >> 3) * d >> 9) + ol;                                              /* (the echo doubled and at half: ol; |x| up to 2^17: >> 3, x 2^12, >> 9) */
+        r[i] = ((y >> 3) * d >> 9) + or_;
+        pk = (uint32_t)(xl < 0 ? -xl : xl) > pk ? (uint32_t)(xl < 0 ? -xl : xl) : pk;
+        pk = (uint32_t)(xr < 0 ? -xr : xr) > pk ? (uint32_t)(xr < 0 ? -xr : xr) : pk;
     }
     dly.act = (int32_t)pk;
 }
