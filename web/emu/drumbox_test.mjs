@@ -2030,6 +2030,25 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const edge = Math.sqrt(d3 / e);
   check(`a busy mix into the DELAY at full FEEDBACK: the edge energy ${edge.toFixed(3)} (0.345 with the hard clamp), the peak ${pk.toFixed(2)} under 0 dBFS`, edge < 0.32 && pk < 0.9);
 }
+// ---- the output limiter: MASTER and VOLUME at the top, three drums on every step, a delay at full MIX and feedback: nothing goes past -0.2 dBFS, nothing is cut flat
+{
+  const loud = async (delay) => {
+    const w = await device(); w.render(200);
+    w.ex.web_master(1023);
+    for (const k of [0, 1, 2]) { w.key(BLACK[k], 20); w.setSteps([...Array(16).keys()]); }
+    w.btn(B.GLO); w.turn(EN.K2, 127 - w.ex.web_vol()); w.btn(B.HOME);
+    if (delay) { w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME); w.fxSet(FX.DELAY, 1, 100); w.fxSet(FX.DELAY, 7, 127); w.btn(B.HOME); }
+    w.ex.web_over();
+    w.ex.web_buttons(1 << B.PLAY); w.render(1500);
+    const c = w.cap(4000); w.ex.web_buttons(0);
+    let pk = 0, near = 0; for (const x of c.l) { const a = Math.abs(x); pk = Math.max(pk, a); }
+    for (const x of c.l) if (Math.abs(x) > pk * 0.995) near++;
+    return { pk, near, over: w.ex.web_over() };
+  };
+  const a = await loud(false), b = await loud(true);
+  check(`a mix that went past 0 dBFS (${a.over} samples) and with the delay (${b.over}): the peaks stay at ${a.pk.toFixed(3)} and ${b.pk.toFixed(3)}, under -0.2 dBFS, none cut flat (${b.near} samples within 0.5 % of the top)`,
+        a.over > 0 && b.over > 0 && a.pk <= 0.98 && b.pk <= 0.98 && b.near < 400);
+}
 // ---- the filters (LOW PASS, BAND PASS) come last: a filter on the step where an echo comes shapes the echo too (it sat ahead of the delay, which echoed the unfiltered sound)
 {
   const echoHighs = async (withLp) => {

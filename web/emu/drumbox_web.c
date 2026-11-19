@@ -422,3 +422,4 @@ EXPORT int32_t web_semi(uint32_t l, uint32_t s) { return l < DBX_NLANE && s < DB
 EXPORT int32_t web_eff16(uint32_t l) { return l < DBX_NLANE ? dbx_eff16(l) : -1; }   /* the pitch of the last hit (the tests) */
 EXPORT uint32_t web_vel(uint32_t lane_i, uint32_t step) { return lane_i < DBX_NLANE && step < DBX_NSTEP ? DBX_E.vel[lane_i][step] : 0; }
 EXPORT uint32_t web_sample_rate(void) { return FS; }
+EXPORT uint32_t web_over(void) { uint32_t v = dbx_audio.over; dbx_audio.over = 0; return v; }
