@@ -423,3 +423,4 @@ EXPORT int32_t web_eff16(uint32_t l) { return l < DBX_NLANE ? dbx_eff16(l) : -1;
 EXPORT uint32_t web_vel(uint32_t lane_i, uint32_t step) { return lane_i < DBX_NLANE && step < DBX_NSTEP ? DBX_E.vel[lane_i][step] : 0; }
 EXPORT uint32_t web_sample_rate(void) { return FS; }
 EXPORT uint32_t web_over(void) { uint32_t v = dbx_audio.over; dbx_audio.over = 0; return v; }
+EXPORT void web_set_fxparam(uint32_t e, uint32_t i, uint32_t v) { if (e < DBX_NFX && i < DBX_NFXP) { dbx_fx.p[e][i] = (uint8_t)(v > 127u ? 127u : v); dbx_fx_rates(e); } }   /* (a test hook: a parameter moved as a knob would, with no page and no preview) */

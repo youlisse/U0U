@@ -2058,6 +2058,24 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   check(`a mix that went past 0 dBFS (${a.over} samples) and with the delay (${b.over}): the peaks stay at ${a.pk.toFixed(3)} and ${b.pk.toFixed(3)}, under -0.2 dBFS, none cut flat (${b.near} samples within 0.5 % of the top)`,
         a.over > 0 && b.over > 0 && a.pk <= 0.98 && b.pk <= 0.98 && b.near < 400);
 }
+// ---- moving the DELAY's SPREAD (PING PONG off: the right line's time) or its TIME while it plays does not click: the read point glides
+{
+  const run = async (pong, param, move) => {
+    const w = await device(); w.render(200);
+    w.key(BLACK[0], 20); w.setSteps([...Array(16).keys()]);
+    w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME);
+    w.fxSet(FX.DELAY, 7, 127); w.fxSet(FX.DELAY, 1, 60); w.fxSet(FX.DELAY, 2, pong ? "on" : "off"); w.fxSet(FX.DELAY, 3, 20); w.btn(B.HOME);
+    w.ex.web_buttons(1 << B.PLAY); w.render(2500);
+    const L = [], R = []; let v = param === 3 ? 20 : 20;
+    for (let k = 0; k < 20; k++) { if (move) { v += param === 3 ? 5 : 6; w.ex.web_set_fxparam(FX.DELAY, param, v); } const c = w.cap(100); L.push(...c.l); R.push(...c.r); }
+    w.ex.web_buttons(0);
+    let mx = 0; for (const X of [L, R]) for (let i = 3; i < X.length; i++) mx = Math.max(mx, Math.abs(X[i] - 3 * X[i - 1] + 3 * X[i - 2] - X[i - 3]));
+    return mx;
+  };
+  const sp0 = await run(false, 3, false), sp1 = await run(false, 3, true), t0 = await run(true, 0, false), t1 = await run(true, 0, true);
+  check(`DELAY SPREAD moved a click at a time with PING PONG off: the largest edge ${sp1.toFixed(3)} against ${sp0.toFixed(3)} held (it was 9 times that)`, sp1 < sp0 * 1.5);
+  check(`  TIME moved through its options while it plays: ${t1.toFixed(3)} against ${t0.toFixed(3)} held`, t1 < t0 * 2.5);
+}
 // ---- the filters (LOW PASS, BAND PASS) come last: a filter on the step where an echo comes shapes the echo too (it sat ahead of the delay, which echoed the unfiltered sound)
 {
   const echoHighs = async (withLp) => {

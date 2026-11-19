@@ -434,7 +434,9 @@ static void fx_flanger(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a
 /* Felucca's tempo delay (fx.c fx_buses), the one that runs on the FM-1, taken as it is: an integer delay in a 16-bit line at half level, read at `dl`; a one-pole
  * low-pass in the feedback (Felucca's COLR 70: 18800 / 32768); the new sample is the input at half level plus the filtered echo times the feedback, clamped to
  * 16 bits (FEEDBACK 0..127 is Felucca's x 230); the echo comes out doubled. Felucca's is one mono line: here two, a side each, for PING PONG (the echoes cross
- * from one line to the other, SPREAD how far apart they come out) and, off, the right line later by SPREAD (up to half a step).
+ * from one line to the other, SPREAD how far apart they come out) and, off, the right line later by SPREAD (up to half a step). The one thing added to the copy: the
+ * time of each line glides and is read with a linear interpolation, because Felucca has no SPREAD: moved here with PING PONG off it jumped the read point by up
+ * to 130 samples a click (measured: a click 9 times the sound's own edges on the right side).
  * Only its level is U0U's: the send (the effect's amount, the step's and the MIX) is the mean of the two sides at it, scaled by sqrt((1 - FEEDBACK^2) (1 - FEEDBACK))
  * so that a high feedback does not make a loop louder (a kick on every step is an echo that lands on the next: they pile up in step), and the dry comes down
  * at most 1.5 dB at the full send. Measured on the emulator: a loop with the delay open on every step is within 0.6 dB of the same loop without it. */
@@ -442,7 +444,14 @@ static void fx_flanger(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a
 #define DLY_COL 18800                                  /* Felucca's COLR 70: 2000 + 70 * 240, Q15 */
 #define DLY_DRY 80                                     /* how far the dry comes down at the full send: 80 / 256 of the square of the send (Q8) */
 static int16_t dly_buf[2][DLY_LEN] __attribute__((section(".pool")));
-static struct { uint32_t w; int32_t lp[2], act; } dly;
+static struct { uint32_t w; int32_t lp[2], dt[2], act; } dly;                 /* (dt: the delay of each line in samples, Q8) */
+
+static inline int32_t dly_read(const int16_t *b, uint32_t w, int32_t dq)   /* the line as it was dq / 256 samples ago (linear interpolation) */
+{
+    uint32_t di = (uint32_t)dq >> 8, i0 = w >= di ? w - di : w + DLY_LEN - di, i1 = i0 == 0u ? DLY_LEN - 1u : i0 - 1u;
+    int32_t fr = dq & 255;
+    return (b[i0] * (256 - fr) + b[i1] * fr) >> 8;
+}
 
 static inline uint32_t dly_isqrt(uint32_t x)                                      /* the integer square root */
 {
@@ -463,16 +472,27 @@ static inline uint32_t dly_isqrt(uint32_t x)                                    
 static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
 {
     const uint8_t *p = dbx_fx.p[FX_DELAY];
-    uint32_t i, dl = dbx_beat_samples() * DBX_DTIME_NUM[dbx_opt(p[0], 6u)] / 4u, dr, pong = p[2] >= 64u, pk = 0;
-    int32_t a = a0, da = (a1 - a0) / (int32_t)n, fb = (int32_t)p[1] * 230, f2 = (fb * fb) >> 15, sp = p[3], nf, ae, d, w2;
+    uint32_t i, ch, dl = dbx_beat_samples() * DBX_DTIME_NUM[dbx_opt(p[0], 6u)] / 4u, dr, pong = p[2] >= 64u, pk = 0;
+    int32_t a = a0, da = (a1 - a0) / (int32_t)n, fb = (int32_t)p[1] * 230, f2 = (fb * fb) >> 15, sp = p[3], nf, ae, d, w2, tq[2];
     if (a0 == 0 && a1 == 0 && dly.act < 8)
         return;
     nf = (int32_t)dly_isqrt((uint32_t)(((32768 - f2) * (32768 - fb)) >> 15) << 15);     /* sqrt((1 - fb^2) (1 - fb)), Q15 */
     dl = dl < 16u ? 16u : dl > DLY_LEN - 2u - 4096u ? DLY_LEN - 2u - 4096u : dl;
     dr = dl + (pong ? 0u : (uint32_t)(dbx_step_samples() / 2u) * (uint32_t)sp / 127u);          /* off: the right side later */
+    tq[0] = (int32_t)dl << 8;
+    tq[1] = (int32_t)dr << 8;
+    for (ch = 0; ch < 2u; ch++)
+        if (dly.dt[ch] == 0)
+            dly.dt[ch] = tq[ch];
     for (i = 0; i < n; i++, a += da) {
-        uint32_t w = dly.w, il = w >= dl ? w - dl : w + DLY_LEN - dl, ir = w >= dr ? w - dr : w + DLY_LEN - dr;
-        int32_t x = l[i], y = r[i], xl = dly_buf[0][il], xr = dly_buf[1][ir], in, ol, or_, wl, wr;
+        uint32_t w = dly.w;
+        int32_t x = l[i], y = r[i], xl, xr, in, ol, or_, wl, wr;
+        for (ch = 0; ch < 2u; ch++) {                                                  /* a time that moves (SPREAD, TIME, the tempo) glides to it, and gets there: a jump of the read point is a click */
+            int32_t e = tq[ch] - dly.dt[ch];
+            dly.dt[ch] += (e + (e >= 0 ? 1023 : -1023)) / 1024;
+        }
+        xl = dly_read(dly_buf[0], w, dly.dt[0]);
+        xr = dly_read(dly_buf[1], w, dly.dt[1]);
         dly.lp[0] += ((xl - dly.lp[0]) * DLY_COL) >> 15;
         dly.lp[1] += ((xr - dly.lp[1]) * DLY_COL) >> 15;
         ae = ((a >> 4) * nf) >> 15;                                                   /* the send, Q12 */
