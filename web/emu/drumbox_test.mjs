@@ -2076,6 +2076,30 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   check(`DELAY SPREAD moved a click at a time with PING PONG off: the largest edge ${sp1.toFixed(3)} against ${sp0.toFixed(3)} held (it was 9 times that)`, sp1 < sp0 * 1.5);
   check(`  TIME moved through its options while it plays: ${t1.toFixed(3)} against ${t0.toFixed(3)} held`, t1 < t0 * 2.5);
 }
+// ---- the DELAY with PING PONG off: one loop, the right side the same echoes SPREAD later at every repeat (it used to be a loop of its own, drifting further each time), and no louder than the dry
+{
+  const w = await device(); w.render(200);
+  w.key(BLACK[7], 20); w.setSteps([0]);
+  w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME);
+  w.fxSet(FX.DELAY, 7, 127); w.fxSet(FX.DELAY, 1, 100); w.fxSet(FX.DELAY, 2, "off"); w.fxSet(FX.DELAY, 3, 100); w.btn(B.HOME);
+  w.ex.web_buttons(1 << B.PLAY); const c = w.cap(1700); w.ex.web_buttons(0);
+  const ol = onsetsOf(c.l, 8, 0.004), or = onsetsOf(c.r, 8, 0.004);
+  const lag = [1, 2, 3, 4].map((k) => or[k] - ol[k]);
+  check(`PING PONG off, feedback 100: the right echoes come ${lag.map((x) => x.toFixed(0)).join(", ")} ms after the left ones (the same each time, about half a step at SPREAD 100: 49)`,
+        ol.length >= 5 && or.length >= 5 && lag.every((x) => Math.abs(x - lag[0]) < 6) && Math.abs(lag[0] - 49) < 8);
+  const loop = async (fx) => {
+    const d = await device(); d.render(200);
+    d.key(BLACK[0], 20); d.setSteps([...Array(16).keys()]);
+    if (fx) { d.btn(B.FX); d.key(BLACK[7], 30); for (let st = 0; st < 16; st++) d.key(WHITE[st], 10); d.btn(B.HOME); d.ex.web_set_fxparam(FX.DELAY, 7, 127); d.ex.web_set_fxparam(FX.DELAY, 1, fx.fb); d.ex.web_set_fxparam(FX.DELAY, 2, 0); d.ex.web_set_fxparam(FX.DELAY, 3, fx.sp); }
+    d.ex.web_buttons(1 << B.PLAY); d.render(2500);
+    const k = d.cap(4000); d.ex.web_buttons(0);
+    let t = 0; for (let i = 0; i < k.l.length; i++) t += k.l[i] * k.l[i] + k.r[i] * k.r[i];
+    return Math.sqrt(t / (2 * k.l.length));
+  };
+  const dry = await loop(null); let worst = 0;
+  for (const fx of [{ fb: 60, sp: 0 }, { fb: 100, sp: 60 }, { fb: 127, sp: 127 }, { fb: 127, sp: 0 }]) worst = Math.max(worst, Math.abs(20 * Math.log10((await loop(fx)) / dry)));
+  check(`  a kick on every step, PING PONG off, FEEDBACK 60 to 127, SPREAD 0 to 127: the level is within ${worst.toFixed(1)} dB of the dry loop`, worst < 1.5);
+}
 // ---- the filters (LOW PASS, BAND PASS) come last: a filter on the step where an echo comes shapes the echo too (it sat ahead of the delay, which echoed the unfiltered sound)
 {
   const echoHighs = async (withLp) => {

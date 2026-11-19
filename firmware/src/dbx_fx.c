@@ -434,7 +434,8 @@ static void fx_flanger(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a
 /* Felucca's tempo delay (fx.c fx_buses), the one that runs on the FM-1, taken as it is: an integer delay in a 16-bit line at half level, read at `dl`; a one-pole
  * low-pass in the feedback (Felucca's COLR 70: 18800 / 32768); the new sample is the input at half level plus the filtered echo times the feedback, clamped to
  * 16 bits (FEEDBACK 0..127 is Felucca's x 230); the echo comes out doubled. Felucca's is one mono line: here two, a side each, for PING PONG (the echoes cross
- * from one line to the other, SPREAD how far apart they come out) and, off, the right line later by SPREAD (up to half a step). The one thing added to the copy: the
+ * from one line to the other, SPREAD how far apart they come out) and, off, the right side the same echoes later by SPREAD (up to half a step: a later tap of the one loop, not a loop of its own, whose echoes would drift further
+ * from the left's with every repeat). The one thing added to the copy: the
  * time of each line glides and is read with a linear interpolation, because Felucca has no SPREAD: moved here with PING PONG off it jumped the read point by up
  * to 130 samples a click (measured: a click 9 times the sound's own edges on the right side).
  * Only its level is U0U's: the send (the effect's amount, the step's and the MIX) is the mean of the two sides at it, scaled by sqrt((1 - FEEDBACK^2) (1 - FEEDBACK))
@@ -492,7 +493,7 @@ static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
             dly.dt[ch] += (e + (e >= 0 ? 1023 : -1023)) / 1024;
         }
         xl = dly_read(dly_buf[0], w, dly.dt[0]);
-        xr = dly_read(dly_buf[1], w, dly.dt[1]);
+        xr = dly_read(dly_buf[pong ? 1 : 0], w, dly.dt[1]);                              /* (PING PONG off: the right side is a later tap of the left line) */
         dly.lp[0] += ((xl - dly.lp[0]) * DLY_COL) >> 15;
         dly.lp[1] += ((xr - dly.lp[1]) * DLY_COL) >> 15;
         ae = ((a >> 4) * nf) >> 15;                                                   /* the send, Q12 */
@@ -503,8 +504,9 @@ static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
             ol = ((xl + xr) >> 1) + (((xl - xr) >> 1) * sp) / 127;                    /* SPREAD: from the middle to apart */
             or_ = ((xl + xr) >> 1) - (((xl - xr) >> 1) * sp) / 127;
         } else {
-            wl = (in >> 1) + ((dly.lp[0] * fb) >> 15);
-            wr = (in >> 1) + ((dly.lp[1] * fb) >> 15);
+            wl = (((in * 181) >> 8) >> 1) + ((dly.lp[0] * fb) >> 15);                    /* one loop, at the time: the right side is the same echoes, SPREAD later (-3 dB: the
+                                                                                          * echoes are on both sides at once, not one side at a time as in PING PONG) */
+            wr = wl;
             ol = xl;
             or_ = xr;
         }
