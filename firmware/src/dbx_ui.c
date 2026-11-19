@@ -1426,6 +1426,8 @@ static void dbx_draw_fx_page(void)                      /* FX: the effect picked
     draw_text_line(196, TITLE_Y + 10u, 32, &AF_S, base ? "2/2" : "1/2", T_MID, T_BG, 2);
     for (k = 0; k < 4u; k++) {
         const dbx_fxp_t *q = dbx_fxp(e, base + k);
+        if (!q->name[0])
+            continue;                                   /* (a knob with no name: none here, as the DELAY's fourth) */
         dbx_fx_fmt(e, base + k, v);
         if (q->opts)
             dbx_row_choice(k, q->name, v, q->opts, dbx_opt(dbx_fx.p[e][base + k], q->opts));
