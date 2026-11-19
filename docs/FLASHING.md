@@ -48,7 +48,8 @@ Do not unplug while it writes; if it is cut, install again (the FM-1 stays in up
 ## 3. First minutes
 
 1. The screen shows the logo, `U0U`, `By`, `@Y_oulisse` for 0.9 s, then the lane page. White keys light as steps, a black key plays its drum.
-2. **SEQ** (tap three times, the third sheet): the bottom line is the audio's load, `LOAD n%  PEAK m%`, with the key scan and USB
+2. **SEQ** (tap twice, the second sheet, the foot of it): which package is installed, `U0U v0.3  FM-1_2100003`.
+   **SEQ** (tap three times, the third sheet): the bottom line is the audio's load, `LOAD n%  PEAK m%`, with the key scan and USB
    nested in it. Press PLAY first. The desktop estimate is 30% at the worst; the board's figure is to be read here (M5.1). Near 100% the
    audio drops out.
 3. Change something, wait, power off, power on: the pattern should come back. **SAVE** held 0.6 s writes at once.

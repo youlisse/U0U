@@ -70,10 +70,11 @@ static int32_t fm1_enc_take(uint32_t e) { int32_t s = web_enc_steps[e % 7u]; web
 
 /* ----------------------------------------------------------- the screen --- */
 static uint16_t web_fb[240 * 240];               /* RGB565 as the panel gets it (high byte first) */
-static uint32_t web_draws;
+static uint32_t web_draws, web_px_fill, web_px_blit;             /* the calls, and the pixels they wrote (the tests: what is drawn at a step) */
 static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
 {
     uint32_t i, j;
+    web_px_fill += w * h;
     uint16_t sw = (uint16_t)((c >> 8) | (c << 8));
     for (j = 0; j < h && y + j < 240u; j++)
         for (i = 0; i < w && x + i < 240u; i++)
@@ -83,6 +84,7 @@ static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
 static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *p)
 {
     uint32_t i, j;
+    web_px_blit += w * h;
     for (j = 0; j < h && y + j < 240u; j++)
         for (i = 0; i < w && x + i < 240u; i++)
             web_fb[(y + j) * 240u + x + i] = p[j * w + i];
@@ -370,6 +372,8 @@ EXPORT int32_t web_lane(uint32_t i, uint32_t f)                                 
         return -1;
     return f == 0u ? lane[i].p.tune : f == 1u ? lane[i].p.decay : f == 2u ? lane[i].p.tone : f == 3u ? lane[i].p.extra : f == 4u ? lane[i].p.level : f == 5u ? lane[i].mute : f == 6u ? lane[i].p.accent : f == 7u ? lane[i].pan : lane[i].choke;
 }
+EXPORT uint32_t web_px_filled(void) { uint32_t n = web_px_fill; web_px_fill = 0; return n; }   /* the pixels written by lcd_fill since the last call (the tests) */
+EXPORT uint32_t web_px_blitted(void) { uint32_t n = web_px_blit; web_px_blit = 0; return n; }
 EXPORT uint32_t web_two(void) { return dbx_seq.two; }                           /* bit p: pattern p has a second section (the tests) */
 EXPORT uint32_t web_vs(void) { return dbx_seq.vs; }                             /* the section shown */
 EXPORT uint32_t web_ps(void) { return dbx_seq.ps; }                             /* the section that comes next (ISR), */

@@ -1952,6 +1952,10 @@ static void dbx_draw_help_page(void)
         draw_text_line(12, y + n * 14u, 84, &AF_S, HELP_L[dbx_help][n], T_THEME, T_BG, 0);
         draw_text_line(100, y + n * 14u, 128, &AF_S, HELP_T[dbx_help][n], T_TEXT, T_BG, 0);
     }
+#ifdef FELUCCA_ID                                                   /* (the FM-1: which package this is, at the foot of the second sheet) */
+    if (dbx_help == 1u)
+        draw_text_line(12, 222, 216, &AF_S, "U0U " FELUCCA_VERSION "  " FELUCCA_ID, T_MID, T_BG, 0);
+#endif
 #ifdef DBX_CPU_LINE                                                 /* (the FM-1: the audio's share of the time) */
     if (dbx_help == 2u) {
         char b[40];
