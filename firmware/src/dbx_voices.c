@@ -18,14 +18,15 @@ static const char *const DBX_NAME[DBX_NLANE] = {"KICK", "SNARE", "CLAP", "HAT CL
  * DEEP TIGHT PERC), every lane a kit's own piece. A model kit has 8 lanes (KICK SNARE CLAP HAT CL HAT OP TOM RIM BELL), some of
  * them another drum (DBX_SWAP, as eng_drum.c's DK_SWAP: 1 its TOM is a conga, 2 its RIM claves, 4 its BELL a cymbal): the lane of
  * that name takes it, and the lane it leaves keeps Felucca's own drum. */
-#define DBX_NKIT (1u + DV_NKIT)
+#define DBX_KIT_BREAK (1u + DV_NKIT)                    /* the last kit plays slices of a break, not drum_voice.c (see BREAK below) */
+#define DBX_NKIT (2u + DV_NKIT)
 /* (named by how they sound, after drum_voice.c's description of each: 80 deep sine kick and six-square hats, 10 small and bright,
  * 66 an early rhythm box, 55 a hard kick and metal cluster, 77 a swelling kick and close claps) */
-static const char *const DBX_KIT_NAME[DBX_NKIT] = {"CLASSIC", "ANALOG", "MINI", "VINTAGE", "METAL", "DISCO", "DEEP", "TIGHT", "PERC"};
+static const char *const DBX_KIT_NAME[DBX_NKIT] = {"CLASSIC", "ANALOG", "MINI", "VINTAGE", "METAL", "DISCO", "DEEP", "TIGHT", "PERC", "BREAK"};
 static const uint8_t DBX_SWAP[DV_NKIT] = {0, 4, 1, 0, 2 | 4, 4, 0, 1 | 2};
 static uint32_t dbx_type_of(uint32_t i, uint32_t kit)   /* the drum lane i plays in a kit (0: STD): a DVT_*, or a model kit's DV_KTYPE */
 {
-    uint32_t sw = kit ? DBX_SWAP[kit - 1u] : 0u, kl;
+    uint32_t sw = kit && kit <= DV_NKIT ? DBX_SWAP[kit - 1u] : 0u, kl;
     switch (i) {
     case L_KICK:  kl = 0; break;
     case L_SNARE: kl = 1; break;
@@ -39,7 +40,7 @@ static uint32_t dbx_type_of(uint32_t i, uint32_t kit)   /* the drum lane i plays
     case L_BELL:  kl = sw & 4u ? 8u : 7u; break;
     default:      kl = sw & 4u ? 7u : 8u; break;       /* L_CYM */
     }
-    return kit && kl < 8u ? DV_KTYPE(kit, kl) : DBX_TYPE[i];
+    return kit && kit <= DV_NKIT && kl < 8u ? DV_KTYPE(kit, kl) : DBX_TYPE[i];     /* (BREAK: the lane's own type, for its pitch range and name) */
 }
 
 /* The keys from F3: the 11 black ones are the lanes, the 16 white ones the steps (-1: the other kind) */
@@ -67,6 +68,9 @@ typedef struct {
     int16_t cg;                            /* ... and the gain of that fade, Q12 */
     uint8_t choke;                         /* its choke group, 0 (none) or 1: a hit cuts the voices of the others of its group (the two hats; no page sets it) */
     uint32_t age;                          /* samples since the last hit (the ENV page's attack and gate follow it) */
+    uint8_t smp;                           /* the kit BREAK: the lane plays its slice of the break, not drum_voice.c */
+    uint32_t bpos;                         /* ... where in the slice, in source samples, Q16 */
+    int32_t blp;                           /* ... and the TONE's low-pass */
 } dbx_lane_t;
 
 #define DBX_VEL_DEF 100u                   /* the velocity of a step as it is placed */
@@ -92,6 +96,12 @@ static void dbx_kit_apply(uint32_t kit, uint32_t reset)
         uint8_t lvl = l->p.level;
         uint32_t t = dbx_type_of(i, kit);
         dv_default(&l->p, t);
+        l->smp = kit == DBX_KIT_BREAK;
+        if (l->smp) {                      /* BREAK: the whole slice, bright, from its start (the lane's drum only gives its pitch range and name) */
+            l->p.decay = 127;
+            l->p.tone = 127;
+            l->p.extra = 0;
+        }
         if (!reset && dbx_kit_run != 255u)
             l->p.level = lvl;
         if (reset) {
@@ -237,6 +247,43 @@ static void dbx_pan_gains(int32_t p, int32_t *gl, int32_t *gr)
         *gr = SINE[256 + (p < -32 ? 32 : -p) * 8] >> 3;
 }
 
+/* ---- BREAK: the kit whose lanes play the slices of a break (dbx_break.h: tools/gen_break.py), 22.05 kHz, 16 bit, read from flash.
+ * TUNE is a varispeed (1/16 semitone a step, from the break's own pitch: a pitch and a speed together, as a sampler's), DECAY how much of the slice plays (127: all of
+ * it, then a fade of 64 source samples), TONE a low-pass (127: none), EXTRA where in the slice it starts (0: the start, 127: half way in), LEVEL and the accent as
+ * for the other drums. A hit restarts the slice; the choke, the velocity, the pan, the ENV page and the effects are the lane's, as for any drum. */
+#include "dbx_break.h"
+
+static void brk_run(dbx_lane_t *l, uint32_t i, const dv_param_t *p, int32_t *y, uint32_t n)
+{
+    const int16_t *s = BRK_PCM + BRK_SLICE[i].off;
+    uint32_t len = BRK_SLICE[i].len, end = len * ((uint32_t)p->decay + 1u) / 128u, k;
+    int32_t out = (int32_t)((uint32_t)p->level * 4096u / 100u), tk = ((int32_t)p->tone + 1) * 32;     /* the low-pass's coefficient, Q12 (4096: none) */
+    uint32_t step = dv_exp2((uint32_t)(p->tune * 4096 / 192 + 8192)) >> 3;                              /* source samples a sample out, Q16: 2^(tune / 192) x 22050 / 44100 */
+    if (l->v.trig) {
+        l->v.trig = 0;
+        l->v.live = 1;
+        l->bpos = (len >> 1) * (uint32_t)p->extra / 127u << 16;
+        l->blp = 0;
+    }
+    out += (out * (int32_t)p->accent * 75) >> 14;
+    end = end < 64u ? 64u : end;
+    for (k = 0; k < n; k++) {
+        uint32_t ip = l->bpos >> 16;
+        int32_t x = 0;
+        if (l->v.live && ip + 1u < end && ip + 1u < len) {
+            int32_t a = s[ip], b = s[ip + 1u], fr = (int32_t)((l->bpos >> 4) & 4095u);
+            x = a + (((b - a) * fr) >> 12);
+            if (end - ip < 64u)
+                x = x * (int32_t)(end - ip) >> 6;
+            if (tk < 4096)
+                x = l->blp += ((x - l->blp) * tk) >> 12;
+            l->bpos += step;
+        } else
+            l->v.live = 0;
+        y[k] = (x * out) >> 12;
+    }
+}
+
 /* adds the lanes' block (n <= CTL) into mix (the middle: what the mono effects take) and side (what a pan adds: left = mix + side, right = mix - side), Q15 */
 static void dbx_voices_render(int32_t *mix, int32_t *side, uint32_t n)
 {
@@ -272,9 +319,13 @@ static void dbx_voices_render(int32_t *mix, int32_t *side, uint32_t n)
             if (dv_uses_metal(l->c.type))
                 dv_metal_tune(&l->mb, &l->c);
         }
-        if (dv_uses_metal(l->c.type))
-            dv_metal_run(&l->mb, dbx_metal, n);
-        dv_run(&l->c, &l->v, dbx_metal, y, n);
+        if (l->smp)
+            brk_run(l, i, &pe, y, n);
+        else {
+            if (dv_uses_metal(l->c.type))
+                dv_metal_run(&l->mb, dbx_metal, n);
+            dv_run(&l->c, &l->v, dbx_metal, y, n);
+        }
         if (!l->mute) {
             int32_t ga = 4096, gb = 4096, pan;
             if (l->choked) {                                   /* a choke: down to nothing in two blocks */

@@ -1641,9 +1641,9 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   check(`at 1/32 the loop is a beat of 8 steps (${m32} different steps heard while held)`, dv() === 32 && m32 === 8);
 }
 
-// ---- the kits: GLO page 2, KNOB 3 (STD and the model kits 80 10 66 55 77 DEEP TIGHT PERC)
+// ---- the kits: GLO page 2, KNOB 3 (STD, the model kits 80 10 66 55 77 DEEP TIGHT PERC, and BREAK: slices of a break)
 {
-  const KITS = ["CLASSIC", "ANALOG", "MINI", "VINTAGE", "METAL", "DISCO", "DEEP", "TIGHT", "PERC"];
+  const KITS = ["CLASSIC", "ANALOG", "MINI", "VINTAGE", "METAL", "DISCO", "DEEP", "TIGHT", "PERC", "BREAK"];
   const w = await device();
   const setKit = (k) => { w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, k - w.ex.web_kit()); w.btn(B.HOME); w.render(400); };
   const feat = (lane) => {                                   // the drum of a lane, stopped: placing step 16 plays it
@@ -1660,7 +1660,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   w.btn(B.HOME);
   check("KNOB 3 on the second GLO page picks the next kit (80)", w.ex.web_kit() === 1);
   w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 20); w.btn(B.HOME);
-  check(`  and stops at the last (${w.ex.web_kit()}: ${KITS[w.ex.web_kit()]})`, w.ex.web_kit() === 8);
+  check(`  and stops at the last (${w.ex.web_kit()}: ${KITS[w.ex.web_kit()]})`, w.ex.web_kit() === 9);
   w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, -20); w.btn(B.HOME);
   check("  and at the first", w.ex.web_kit() === 0);
   // picking a kit plays its kick
@@ -1669,17 +1669,17 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   check(`  picking a kit plays its kick (peak ${pkv.toFixed(2)})`, pkv > 0.05 && pkv <= 1);
   w.btn(B.HOME);
   const sigs = [], bad = [];
-  for (let k = 0; k < 9; k++) {
+  for (let k = 0; k < 10; k++) {
     setKit(k);
     const row = []; 
     for (let lane = 0; lane < 11; lane++) { const f = feat(lane); row.push(f.sig); if (!(f.pk > 0.004 && f.pk <= 1)) bad.push(`${KITS[k]}/${NAMES[lane]}:${f.pk.toFixed(3)}`); }
     sigs.push(row);
   }
-  check(`every drum of every kit sounds, and never over 0 dBFS (${bad.length ? bad.join(" ") : "all 99"})`, bad.length === 0);
+  check(`every drum of every kit sounds, and never over 0 dBFS (${bad.length ? bad.join(" ") : "all 110"})`, bad.length === 0);
   const diffs = sigs.map((r) => r.filter((x, i) => x !== sigs[0][i]).length);
   check(`every model kit sounds unlike STD (lanes that differ: ${diffs.slice(1).join(" ")} of 11)`, diffs.slice(1).every((n) => n >= 4));
   const uniq = new Set(sigs.map((r) => r.join(";")));
-  check(`  and the nine kits are all different (${uniq.size} of 9)`, uniq.size === 9);
+  check(`  and the ten kits are all different (${uniq.size} of 10)`, uniq.size === 10);
   // the kick's pitch is a note in every kit, and TUNE steps by semitones inside the kit's range
   setKit(1); w.key(BLACK[0], 20);
   const n80 = w.ex.web_note16(0); w.turn(EN.K1, 1); const n80b = w.ex.web_note16(0);
@@ -1698,6 +1698,44 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   r.ex.web_keys(1 << WHITE[15]); const cr = r.cap(300); r.ex.web_keys(0);
   let e = 0, zc = 0; for (let i = 0; i < cr.l.length; i++) { e += cr.l[i] * cr.l[i]; if (i && (cr.l[i] < 0) !== (cr.l[i - 1] < 0)) zc++; }
   check(`  and its kick sounds as it did (${kick6} / ${Math.sqrt(e / cr.l.length).toFixed(3)}|${zc})`, kick6 === `${Math.sqrt(e / cr.l.length).toFixed(3)}|${zc}`);
+}
+
+// ---- the kit BREAK: every lane plays its slice of the break (tools/gen_break.py); TUNE is a varispeed, DECAY the part of the slice that plays, TONE a low-pass
+{
+  const w = await device();
+  const hit = (lane, set) => {                                // the lane's hit, stopped: placing step 16 plays it
+    w.key(BLACK[lane], 20); if (set) set();
+    w.ex.web_keys(1 << WHITE[15]); const c = w.cap(900); w.ex.web_keys(0); w.render(100);
+    w.key(WHITE[15], 20);
+    return c.l;
+  };
+  const len = (a) => { let m = 0; for (const v of a) m = Math.max(m, Math.abs(v)); let last = 0; for (let i = 0; i < a.length; i += 220) { let e = 0; for (let k = i; k < Math.min(a.length, i + 220); k++) e = Math.max(e, Math.abs(a[k])); if (e > m * 0.03) last = i + 220; } return last / 44.1; };
+  const first = (a) => { let m = peakOf(a); for (let i = 0; i < a.length; i++) if (Math.abs(a[i]) > m * 0.02) return i; return -1; };
+  const std = first(hit(0));                                  // (the kick of CLASSIC: the same wait from the key to the sound)
+  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 9 - w.ex.web_kit()); w.btn(B.HOME); w.render(400);
+  const kit = w.ex.web_kit();
+  check(`BREAK is the last kit (${kit})`, kit === 9);
+  // every slice plays, its length is the slice's (the kick 220 ms, the crash 700 ms), and starts clean
+  const kick = hit(0), crash = hit(10), snare = hit(1);
+  const lk = len(kick), lc = len(crash);
+  check(`the kick plays its slice (${lk.toFixed(0)} ms of 220), the crash its own (${lc.toFixed(0)} ms of 700), peaks ${peakOf(kick).toFixed(2)} / ${peakOf(snare).toFixed(2)} / ${peakOf(crash).toFixed(2)}`,
+        lk > 90 && lk < 260 && lc > 400 && lc < 760 && peakOf(kick) > 0.1 && peakOf(snare) > 0.1 && peakOf(crash) > 0.05 && peakOf(kick) < 0.7 && peakOf(snare) < 0.7);
+  check(`  a hit starts as soon as the kick of CLASSIC does (${(first(kick) / 44.1).toFixed(1)} ms against ${(std / 44.1).toFixed(1)}: the wait from the key)`, first(kick) >= 0 && first(kick) < std + 130);
+  // DECAY: the part of the slice that plays
+  const short = hit(10, () => w.turn(EN.K2, -90));
+  check(`  DECAY down: the crash plays a part of its slice (${len(short).toFixed(0)} ms against ${lc.toFixed(0)})`, len(short) < lc * 0.5);
+  w.turn(EN.K2, 127);
+  // TUNE: a varispeed, +12 semitones: twice the speed, half the length
+  const up = hit(0, () => w.turn(EN.K1, 12)), upLen = len(up);
+  check(`  TUNE +12 semitones: the kick plays twice as fast (${upLen.toFixed(0)} ms against ${lk.toFixed(0)})`, upLen > lk * 0.35 && upLen < lk * 0.65);
+  w.turn(EN.K1, -12);
+  // TONE: a low-pass
+  const hat = hit(4), dark = hit(4, () => w.turn(EN.K3, -127));
+  check(`  TONE down: the open hat is darker (${hfRatio(dark).toFixed(2)} against ${hfRatio(hat).toFixed(2)})`, hfRatio(dark) < hfRatio(hat) * 0.7);
+  w.turn(EN.K3, 127);
+  // LEVEL
+  const lo = hit(1, () => w.turn(EN.K4, -10));
+  check(`  LEVEL down: the snare is quieter (${peakOf(lo).toFixed(2)} against ${peakOf(snare).toFixed(2)})`, peakOf(lo) < peakOf(snare) * 0.9 && peakOf(lo) > 0.02);
 }
 
 // ---- the LFO button: two LFOs, LFO 1 on the volume, LFO 2 on the pan (RATE, AMOUNT, SHAPE, PHASE), locked to the tempo
