@@ -40,7 +40,7 @@ static const uint8_t DBX_FX_ATKREL[DBX_NFX][2] = {{10, 40}, {2, 16}, {2, 16}, {4
                                                   {4, 20}, {0, 60}, {2, 16}};
 /* the mix a step of each effect starts at (SELECT moves it): the sends are placed at a good level, not full */
 static const uint8_t DBX_FX_STEPMIX[DBX_NFX] = {100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100};   /* a step starts at full: the amount is the effect's MIX */
-static const uint8_t DBX_FX_MIXDEF[DBX_NFX] = {127, 127, 127, 127, 127, 127, 127, 51, 127, 26, 127};      /* ... the delay's at 40 %, the reverb's at 20 % */
+static const uint8_t DBX_FX_MIXDEF[DBX_NFX] = {127, 127, 127, 127, 127, 127, 127, 64, 127, 26, 127};      /* ... the delay's at 50 %, the reverb's at 20 % */
 static const char *const DBX_DTIME_NAME[6] = {"1/16", "1/8", "3/16", "1/4", "3/8", "1/2"};
 static const uint8_t DBX_DTIME_NUM[6] = {1, 2, 3, 4, 6, 8};                    /* in quarters of a beat */
 
@@ -431,37 +431,72 @@ static void fx_flanger(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a
 }
 
 /* -------------------------------------------------------------- DELAY --- */
-/* tempo-synced. PING PONG on: the echoes alternate left and right, SPREAD is how far apart; off: the same echo on both
- * sides, the right one SPREAD later (up to half a step). The effect's amount is the send, the line runs on after it
- * closes; the feedback goes through a fixed gentle low-pass. */
+/* A tempo-synced stereo delay, written from nothing. The send (the effect's amount: the step's and the MIX) feeds the mono sum into a line; the echoes come back
+ * at half the line's level and run on after the effect closes. PING PONG on: the echoes alternate left and right, SPREAD is how far apart; off: the same echo
+ * on both sides, the right one SPREAD later (up to half a step). The feedback goes through a fixed gentle low-pass and a soft knee (a line this size cannot take
+ * what a busy mix with feedback asks of it, and a hard clamp in a loop folds).
+ * Its level: the send is scaled by sqrt((1 - FEEDBACK^2) (1 - FEEDBACK)): the echoes of a sound that does not repeat add the same energy whatever the feedback
+ * (the first factor: more of it only makes them last), and those of a sound that repeats on the delay's own time (a kick on every step) pile up in step, which
+ * the second factor takes back. The dry sound comes down a little as the send goes up (DLY_DRY, at most 1.5 dB), so the delay makes the whole no louder. Nothing here changes the gain of the whole
+ * sound from block to block. The time glides (a tempo change bends the echoes, as a tape does) and is read with a linear interpolation: no clicks. */
 #define DLY_LEN 49152u
 #define DLY_TONE_K 2077                                /* the feedback's one-pole, Q12 (about half open) */
-static int16_t dly_buf[2][DLY_LEN] __attribute__((section(".pool")));
-static struct { uint32_t w; int32_t dt[2], flp[2], act; } dly;
+#define DLY_DRY 80                                     /* how far the dry comes down at the full send: 80 / 256 of the echoes' energy (Q8) */
+static int16_t dly_buf[2][DLY_LEN] __attribute__((section(".pool")));      /* the line, at half the level: the chain above it runs to four times an int16 */
+static struct { uint32_t w; int32_t dt[2], flp[2], act; } dly;               /* (dt: the delay in samples, Q8) */
+
+static inline uint32_t dly_isqrt(uint32_t x)                                      /* the integer square root */
+{
+    uint32_t r = 0, b = 1u << 30;
+    while (b > x)
+        b >>= 2;
+    while (b) {
+        if (x >= r + b) {
+            x -= r + b;
+            r = (r >> 1) + b;
+        } else
+            r >>= 1;
+        b >>= 2;
+    }
+    return r;
+}
+
+static inline int32_t dly_read(const int16_t *b, uint32_t w, int32_t dq)   /* the line as it was dq / 256 samples ago, at full level */
+{
+    uint32_t di = (uint32_t)dq >> 8, i0 = w >= di ? w - di : w + DLY_LEN - di, i1 = i0 == 0u ? DLY_LEN - 1u : i0 - 1u;
+    int32_t fr = dq & 255;
+    return ((b[i0] * (256 - fr) + b[i1] * fr) >> 8) * 2;
+}
 
 static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
 {
     const uint8_t *p = dbx_fx.p[FX_DELAY];
     uint32_t i, ch, opt = dbx_opt(p[0], 6u), tgt = dbx_beat_samples() * DBX_DTIME_NUM[opt] / 4u, pk = 0, pong = p[2] >= 64u;
-    int32_t a = a0, da = (a1 - a0) / (int32_t)n, fb = (int32_t)p[1] * 29000 / 127, sp = p[3], tt[2];
+    int32_t a = a0, da = (a1 - a0) / (int32_t)n, fb = (int32_t)p[1] * 29000 / 127, sp = p[3], tq[2], f2 = (fb * fb) >> 15, nf, ae;
     if (a0 == 0 && a1 == 0 && dly.act < 8)
         return;
+    nf = (int32_t)dly_isqrt((uint32_t)(((32768 - f2) * (32768 - fb)) >> 15) << 15);   /* sqrt((1 - fb^2) (1 - fb)), Q15 */
     if (tgt > DLY_LEN - 2u - 4096u)
         tgt = DLY_LEN - 2u - 4096u;
     if (tgt < 64u)
         tgt = 64u;
-    tt[0] = (int32_t)tgt;
-    tt[1] = (int32_t)tgt + (pong ? 0 : (int32_t)(dbx_step_samples() / 2u) * sp / 127);   /* off: the right side later */
-    for (ch = 0; ch < 2u; ch++) {
-        dly.dt[ch] += (tt[ch] - dly.dt[ch]) >> 3;                                  /* a tempo change glides */
-        if (dly.dt[ch] == 0 || (tt[ch] - dly.dt[ch] < 8 && tt[ch] - dly.dt[ch] > -8))
-            dly.dt[ch] = tt[ch];
-    }
+    tq[0] = (int32_t)tgt << 8;
+    tq[1] = ((int32_t)tgt + (pong ? 0 : (int32_t)(dbx_step_samples() / 2u) * sp / 127)) << 8;   /* off: the right side later */
+    for (ch = 0; ch < 2u; ch++)
+        if (dly.dt[ch] == 0)
+            dly.dt[ch] = tq[ch];
     for (i = 0; i < n; i++, a += da) {
-        int32_t rl = dly_buf[0][(dly.w + DLY_LEN - (uint32_t)dly.dt[0]) % DLY_LEN] * 2;
-        int32_t rr = dly_buf[1][(dly.w + DLY_LEN - (uint32_t)dly.dt[1]) % DLY_LEN] * 2;
-        int32_t in = ((((l[i] + r[i]) >> 3)) * (a >> 1)) >> 13, fl_ = dbx_lp1(&dly.flp[0], rl, DLY_TONE_K),
-                fr_ = dbx_lp1(&dly.flp[1], rr, DLY_TONE_K), wl, wr, ol = rl, or_ = rr;
+        int32_t x = l[i], y = r[i], rl, rr, fl_, fr_, wl, wr, ol, or_, in, d, w2;
+        for (ch = 0; ch < 2u; ch++) {                                                  /* the time glides to its target (and gets there) */
+            int32_t e = tq[ch] - dly.dt[ch];
+            dly.dt[ch] += (e + (e >= 0 ? 1023 : -1023)) / 1024;
+        }
+        rl = dly_read(dly_buf[0], dly.w, dly.dt[0]);
+        rr = dly_read(dly_buf[1], dly.w, dly.dt[1]);
+        fl_ = dbx_lp1(&dly.flp[0], rl, DLY_TONE_K);
+        fr_ = dbx_lp1(&dly.flp[1], rr, DLY_TONE_K);
+        ae = ((a >> 4) * nf) >> 15;                                                   /* the send, Q12 */
+        in = ((((x + y) >> 1) >> 3) * ae) >> 9;                                       /* (the mean of the two sides, at the send) */
         if (pong) {                                                                   /* the input in the left line, each echo into the other */
             wl = in + ((fr_ * fb) >> 15);
             wr = (fl_ * fb) >> 15;
@@ -470,64 +505,23 @@ static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
         } else {
             wl = in + ((fl_ * fb) >> 15);
             wr = in + ((fr_ * fb) >> 15);
+            ol = rl;
+            or_ = rr;
         }
-        /* the line holds half the level (a 16-bit line, and the chain above it runs to 4 times that: a busy mix with a high FEEDBACK reached its end, and the
-         * hard clamp that was here folded it, the feedback building the fold up); what is over half its range is bent by the soft knee, as a tape delay does */
         dly_buf[0][dly.w] = (int16_t)dbx_hard(dbx_limit((wl + 1) >> 1));
         dly_buf[1][dly.w] = (int16_t)dbx_hard(dbx_limit((wr + 1) >> 1));
         if (++dly.w >= DLY_LEN)
             dly.w = 0;
-        l[i] += ol >> 1;                               /* (the echo at half the line's level: -6 dB under the send; it was 3/4, and the echoes stood out) */
-        r[i] += or_ >> 1;
+        w2 = ((a >> 4) * (a >> 4)) >> 12;                                             /* the send squared, Q12 */
+        d = 4096 - ((w2 * DLY_DRY) >> 8);                                             /* the dry's gain, Q12 */
+        l[i] = ((x >> 3) * d >> 9) + (ol >> 1);                                       /* (|x| up to 2^17: >> 3, x 2^12, >> 9 keeps 32 bits) */
+        r[i] = ((y >> 3) * d >> 9) + (or_ >> 1);
         if ((uint32_t)(rl < 0 ? -rl : rl) > pk)
             pk = (uint32_t)(rl < 0 ? -rl : rl);
         if ((uint32_t)(rr < 0 ? -rr : rr) > pk)
             pk = (uint32_t)(rr < 0 ? -rr : rr);
     }
     dly.act = (int32_t)pk;
-}
-
-/* The delay's level guard. Echoes of a repeating sound land on the next hit and add to it (a kick on every step with a delay of two steps: each echo falls on
- * a kick, in phase; at full MIX and a high FEEDBACK that doubled the volume). The sum after the delay is kept to about 1 dB over the peaks that went in (a little more while the gain comes down) (the
- * recent ones: the reference rises at once and falls over about 0.7 s): a gain that comes down at once and goes back up over some 90 ms. An echo in a gap
- * is far under that and is left alone; so is a delay that has nothing to do. */
-static struct { int32_t ref, g; } dgd = {0, 4096};
-
-static void fx_delay_guard(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
-{
-    uint32_t i;
-    int32_t pd = 0, po = 0, cap, tg, g0 = dgd.g, g1;
-    if (a0 == 0 && a1 == 0 && dly.act < 8) {
-        dgd.g = 4096;
-        dgd.ref = 0;
-        fx_delay(l, r, n, a0, a1);
-        return;
-    }
-    for (i = 0; i < n; i++) {
-        int32_t x = l[i] < 0 ? -l[i] : l[i], y = r[i] < 0 ? -r[i] : r[i];
-        pd = x > pd ? x : pd;
-        pd = y > pd ? y : pd;
-    }
-    fx_delay(l, r, n, a0, a1);
-    for (i = 0; i < n; i++) {
-        int32_t x = l[i] < 0 ? -l[i] : l[i], y = r[i] < 0 ? -r[i] : r[i];
-        po = x > po ? x : po;
-        po = y > po ? y : po;
-    }
-    dgd.ref = pd > dgd.ref ? pd : dgd.ref - (dgd.ref >> 10);
-    cap = dgd.ref + (dgd.ref >> 3);                                                 /* (+1 dB over what came in) */
-    if (cap < 4000)
-        cap = 4000;                                                                 /* (a tail under -18 dBFS is left as it rings) */
-    tg = po > cap ? (int32_t)((int64_t)cap * 4096 / po) : 4096;
-    g1 = tg < g0 ? tg : g0 + ((4096 - g0) >> 7);
-    if (g0 == 4096 && g1 == 4096)
-        return;
-    for (i = 0; i < n; i++) {
-        int32_t g = g0 + (g1 - g0) * (int32_t)(i + 1u) / (int32_t)n;
-        l[i] = ((l[i] >> 3) * g) >> 9;                                              /* (|x| up to 2^17: >> 3, x 2^12, >> 9 keeps 32 bits) */
-        r[i] = ((r[i] >> 3) * g) >> 9;
-    }
-    dgd.g = g1;
 }
 
 /* ------------------------------------------------------------- REVERB --- */
@@ -763,7 +757,7 @@ static void dbx_fx_process(const int32_t *mix, const int32_t *side, int32_t *l, 
     else
         duck = 0;
     fx_flanger(l, r, n, a0[FX_FLANGE], a1[FX_FLANGE]);
-    fx_delay_guard(l, r, n, a0[FX_DELAY], a1[FX_DELAY]);
+    fx_delay(l, r, n, a0[FX_DELAY], a1[FX_DELAY]);
     fx_repeat(l, r, n, a0[FX_REPEAT], a1[FX_REPEAT]);
     fx_reverb(l, r, n, a0[FX_REVERB], a1[FX_REVERB]);
     if (duck)

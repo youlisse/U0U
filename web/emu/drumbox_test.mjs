@@ -1112,8 +1112,8 @@ for (let i = 0; i < BLACK.length; i++) {
   const w = await device(); w.render(200);
   w.btn(B.FX);
   for (const e of [FX.DELAY, FX.SAT1, FX.HALF, FX.PAN, FX.REVERB]) { w.key(BLACK[e], 20); w.key(WHITE[0], 20); }
-  check(`a step of every effect starts at a mix of 100 (the delay's and the reverb's amount is the effect's MIX: ${w.ex.web_fxparam(FX.DELAY, 7)} = 40 %, ${w.ex.web_fxparam(FX.REVERB, 7)} = 20 %)`,
-        [FX.DELAY, FX.REVERB, FX.SAT1, FX.HALF, FX.PAN].every((e) => w.ex.web_fxmix(0, e, 0) === 100) && w.ex.web_fxparam(FX.DELAY, 7) === 51 && w.ex.web_fxparam(FX.REVERB, 7) === 26 &&
+  check(`a step of every effect starts at a mix of 100 (the delay's and the reverb's amount is the effect's MIX: ${w.ex.web_fxparam(FX.DELAY, 7)} = 50 %, ${w.ex.web_fxparam(FX.REVERB, 7)} = 20 %)`,
+        [FX.DELAY, FX.REVERB, FX.SAT1, FX.HALF, FX.PAN].every((e) => w.ex.web_fxmix(0, e, 0) === 100) && w.ex.web_fxparam(FX.DELAY, 7) === 64 && w.ex.web_fxparam(FX.REVERB, 7) === 26 &&
         [FX.SAT1, FX.HALF, FX.PAN, FX.LP].every((e) => w.ex.web_fxparam(e, 7) === 127));
   check(`  the REVERB starts at SIZE 20 %, WIDTH 20 % (${w.ex.web_fxparam(FX.REVERB, 0)}, ${w.ex.web_fxparam(FX.REVERB, 3)} of 127 = ${Math.floor(w.ex.web_fxparam(FX.REVERB, 0) * 100 / 127)} %, ${Math.floor(w.ex.web_fxparam(FX.REVERB, 3) * 100 / 127)} %), MIX 20 %`, Math.floor(w.ex.web_fxparam(FX.REVERB, 0) * 100 / 127) === 20 && Math.floor(w.ex.web_fxparam(FX.REVERB, 3) * 100 / 127) === 20 && Math.floor(w.ex.web_fxparam(FX.REVERB, 7) * 100 / 127) === 20);
   w.turn(EN.SELECT, -2);
@@ -1261,13 +1261,13 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     check(`DELAY (1/8, no feedback): the rim, then its echo 250 ms later (${of.map((x) => x.toFixed(0)).join(" ")} against ${od.map((x) => x.toFixed(0)).join(" ")})`,
           od.length === 1 && of.length >= 2 && near(of[1] - of[0], 250, 4));
     check("  PING PONG off: the same echo on both sides", onsetsOf(f.r).length === of.length && near(onsetsOf(f.r)[1] - onsetsOf(f.r)[0], 250, 4));
-    const g = await run(FX.DELAY, { 1: 80, 2: "off", 3: 0 }, { drums: one, ms: 1500 });
+    const g = await run(FX.DELAY, { 1: 80, 2: "off", 3: 0, 7: 127 }, { drums: one, ms: 1500 });
     check(`  with FEEDBACK the echo repeats (${onsetsOf(g.l, 8, 0.006).length} hits)`, onsetsOf(g.l, 8, 0.006).length >= 4);
     const h = await run(FX.DELAY, { 1: 0, 2: "off", 3: 127 }, { drums: one, ms: 900 });
     const hl = onsetsOf(h.l), hr = onsetsOf(h.r);
     check(`  SPREAD (ping pong off): the right echo comes later, ${hr[1] !== undefined ? (hr[1] - hl[1]).toFixed(0) : "?"} ms after the left (half a step: 62)`, hl.length >= 2 && hr.length >= 2 && near(hr[1] - hl[1], 62.5, 6));
     // PING PONG on: the echoes alternate, the first on the left, the second on the right
-    const pp = await run(FX.DELAY, { 1: 70, 3: 127 }, { drums: one, ms: 1200 });
+    const pp = await run(FX.DELAY, { 1: 70, 3: 127, 7: 127 }, { drums: one, ms: 1200 });
     const ol = onsetsOf(pp.l, 8, 0.012), or = onsetsOf(pp.r, 8, 0.012);
     const has = (a, t) => a.some((x) => near(x, t, 6));
     check(`  PING PONG on: the first echo (250 ms) is on the left (${ol.map((x) => x.toFixed(0)).join(" ")}), not the right (${or.map((x) => x.toFixed(0)).join(" ")})`, has(ol, ol[0] + 250) && !has(or, or[0] + 250));
@@ -2017,18 +2017,27 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const e = await lone(127);
   check(`  a lone echo at full MIX stays about 7 dB under its hit, the guard does not touch it (${e.toFixed(1)} dB)`, e > -8 && e < -6);
 }
-// ---- the DELAY line does not fold: six drums on every step, full MIX, FEEDBACK at the top (the line used to clamp hard at its 16 bits, the feedback building it up)
+// ---- the DELAY is no louder than the dry sound: a loop with it open on every step, at any MIX and FEEDBACK, comes out within 1 dB of the same loop without it
 {
-  const w = await device(); w.render(200);
-  const all = [...Array(16).keys()];
-  for (const k of [0, 1, 2, 3, 4, 5]) { w.key(BLACK[k], 20); w.setSteps(all); }
-  w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME); w.fxSet(FX.DELAY, 1, 127); w.fxSet(FX.DELAY, 7, 127); w.btn(B.HOME);
-  w.ex.web_buttons(1 << B.PLAY); w.render(2500);
-  const c = Array.from(w.cap(4000).l); w.ex.web_buttons(0);
-  let e = 0, d3 = 0, pk = 0;
-  for (let i = 3; i < c.length; i++) { e += c[i] * c[i]; pk = Math.max(pk, Math.abs(c[i])); const d = c[i] - 3 * c[i - 1] + 3 * c[i - 2] - c[i - 3]; d3 += d * d; }
-  const edge = Math.sqrt(d3 / e);
-  check(`a busy mix into the DELAY at full FEEDBACK: the edge energy ${edge.toFixed(3)} (0.345 with the hard clamp), the peak ${pk.toFixed(2)} under 0 dBFS`, edge < 0.32 && pk < 0.9);
+  const loop = async (lanes, fx) => {
+    const w = await device(); w.render(200);
+    for (const k of lanes) { w.key(BLACK[k], 20); w.setSteps([...Array(16).keys()]); }
+    if (fx) { w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME); w.fxSet(FX.DELAY, 1, fx.fb); w.fxSet(FX.DELAY, 7, fx.mix); w.btn(B.HOME); }
+    w.ex.web_buttons(1 << B.PLAY); w.render(2500);
+    const c = w.cap(4000); w.ex.web_buttons(0);
+    let t = 0, pk = 0; for (let i = 0; i < c.l.length; i++) { t += c.l[i] * c.l[i] + c.r[i] * c.r[i]; pk = Math.max(pk, Math.abs(c.l[i]), Math.abs(c.r[i])); }
+    return { rms: Math.sqrt(t / (2 * c.l.length)), pk };
+  };
+  const rows = [];
+  for (const lanes of [[0], [0, 1, 2], [0, 1, 2, 3, 4, 5]]) {
+    const dry = await loop(lanes, null);
+    for (const fx of [{ mix: 64, fb: 60 }, { mix: 127, fb: 100 }, { mix: 127, fb: 127 }]) {
+      const d = await loop(lanes, fx);
+      rows.push({ lanes: lanes.length, ...fx, db: 20 * Math.log10(d.rms / dry.rms), dp: 20 * Math.log10(d.pk / dry.pk) });
+    }
+  }
+  const worst = rows.reduce((m, r) => Math.max(m, Math.abs(r.db)), 0), worstp = rows.reduce((m, r) => Math.max(m, r.dp), -9);
+  check(`DELAY open on every step, 1 / 3 / 6 drums, MIX and FEEDBACK from the start to the top: the level is within ${worst.toFixed(1)} dB (rms) and ${worstp.toFixed(1)} dB (peak) of the dry loop`, worst < 1 && worstp < 1.5);
 }
 // ---- the output limiter: MASTER and VOLUME at the top, three drums on every step, a delay at full MIX and feedback: nothing goes past -0.2 dBFS, nothing is cut flat
 {
