@@ -1254,21 +1254,27 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     let diff = 0; for (let i = 0; i < f.l.length; i++) diff += Math.abs(f.l[i] - f.r[i]);
     check(`FLANGER (SPREAD): the left and the right differ (${(diff / f.l.length).toFixed(5)})`, diff / f.l.length > 0.0005);
   }
-  // DELAY (a send with a dry / wet mix): one rim, a tempo-synced echo (1/8 at 120 BPM: 250 ms), without feedback, at 50 %: all of the dry and all of the echo
+  // DELAY (a send with a dry / wet mix): one rim, a tempo-synced echo (1/8 at 120 BPM: 250 ms), without feedback, PING PONG off: the same echo on both sides
   { const one = (w) => { w.key(BLACK[7], 30); w.setSteps([0]); };
-    const mid = { 1: 0, 7: 64 };
-    const f = await run(FX.DELAY, mid, { drums: one, ms: 900 }), d = await run(FX.DELAY, mid, { drums: one, ms: 900, cont: false });
+    const off = { 1: 0, 2: "off", 3: 0, 7: 64 };
+    const f = await run(FX.DELAY, off, { drums: one, ms: 900 }), d = await run(FX.DELAY, off, { drums: one, ms: 900, cont: false });
     const of = onsetsOf(f.l), od = onsetsOf(d.l);
     check(`DELAY (1/8, no feedback): the rim, then its echo 250 ms later (${of.map((x) => x.toFixed(0)).join(" ")} against ${od.map((x) => x.toFixed(0)).join(" ")})`,
           od.length === 1 && of.length >= 2 && near(of[1] - of[0], 250, 4));
-    check("  the same echo on both sides", onsetsOf(f.r).length === of.length && near(onsetsOf(f.r)[1] - onsetsOf(f.r)[0], 250, 4) && near(rms(f.l), rms(f.r), rms(f.l) * 0.001));
-    const g = await run(FX.DELAY, { 1: 100, 7: 64 }, { drums: one, ms: 1500 });
+    check("  PING PONG off: the same echo on both sides", onsetsOf(f.r).length === of.length && near(onsetsOf(f.r)[1] - onsetsOf(f.r)[0], 250, 4) && near(rms(f.l), rms(f.r), rms(f.l) * 0.001));
+    const g = await run(FX.DELAY, { 1: 100, 2: "off", 3: 0, 7: 64 }, { drums: one, ms: 1500 });
     check(`  with FEEDBACK the echo repeats (${onsetsOf(g.l, 8, 0.004).length} hits)`, onsetsOf(g.l, 8, 0.004).length >= 4);
-    // TONE: the repeats of a bright sound (a hat) are darker with a low TONE
-    const hat = (w) => { w.key(BLACK[3], 30); w.setSteps([0]); };
-    const hf = (X, from, to) => { let e = 0, d2 = 0; for (let i = Math.round(from * 44.1) + 2; i < Math.round(to * 44.1); i++) { e += X[i] * X[i]; const dd = X[i] - 2 * X[i - 1] + X[i - 2]; d2 += dd * dd; } return Math.sqrt(d2 / (e || 1e-12)); };
-    const dark = await run(FX.DELAY, { 1: 90, 2: 0, 7: 64 }, { drums: hat, ms: 1400 }), bright = await run(FX.DELAY, { 1: 90, 2: 127, 7: 64 }, { drums: hat, ms: 1400 });
-    check(`  TONE: the repeats are darker at 0 than at 100 % (highs ${hf(dark.l, 300, 1300).toFixed(2)} against ${hf(bright.l, 300, 1300).toFixed(2)})`, hf(dark.l, 300, 1300) < hf(bright.l, 300, 1300) * 0.85);
+    const h = await run(FX.DELAY, { 1: 0, 2: "off", 3: 127, 7: 64 }, { drums: one, ms: 900 });
+    const hl = onsetsOf(h.l), hr = onsetsOf(h.r);
+    check(`  SPREAD (ping pong off): the right echo comes later, ${hr[1] !== undefined ? (hr[1] - hl[1]).toFixed(0) : "?"} ms after the left (half a step: 62)`, hl.length >= 2 && hr.length >= 2 && near(hr[1] - hl[1], 62.5, 6));
+    // PING PONG on: the echoes alternate, the first on the left, the second on the right
+    const pp = await run(FX.DELAY, { 1: 70, 2: "on", 3: 127, 7: 64 }, { drums: one, ms: 1200 });
+    const ol = onsetsOf(pp.l, 8, 0.008), or = onsetsOf(pp.r, 8, 0.008);
+    const has = (a, t) => a.some((x) => near(x, t, 6));
+    check(`  PING PONG on: the first echo (250 ms) is on the left (${ol.map((x) => x.toFixed(0)).join(" ")}), not the right (${or.map((x) => x.toFixed(0)).join(" ")})`, has(ol, ol[0] + 250) && !has(or, or[0] + 250));
+    check("  the second (500 ms) is on the right, not the left", has(or, ol[0] + 500) && !has(ol, ol[0] + 500));
+    const zero = await run(FX.DELAY, { 1: 70, 2: "on", 3: 0, 7: 64 }, { drums: one, ms: 1200 });
+    check("  SPREAD 0: both echoes in the middle (left and right alike)", near(rms(zero.l), rms(zero.r), rms(zero.l) * 0.05));
   }
   // REVERB: a tail where the dry sound is silent
   { const one = (w) => { w.key(BLACK[7], 30); w.setSteps([0]); };
@@ -2029,50 +2035,85 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const v0 = await lone(FX.REVERB, 0), v100 = await lone(FX.REVERB, 127);
   check(`REVERB mix 0 / 100 %: the hit itself ${(v0.dry / ref).toFixed(2)} then ${(v100.dry / ref).toFixed(2)} of the dry: all dry, then only what the room gives back at once`, Math.abs(v0.dry - ref) < ref * 0.03 && v100.dry < ref * 0.5);
 }
-// ---- the loudness of a loop with the DELAY open on every step: the dry and the echoes at the level that was sent add up to 3 dB at most (at the middle of the mix), and
-// the delay, all wet, is quieter than the dry; the feedback changes the length of the echoes and not the level (the send is scaled by it)
+// ---- the loudness of a loop with the DELAY open on every step: the dry and the echoes at the level that was sent add up to 4 dB at most (at the middle of the mix), PING PONG on or off,
+// SPREAD at 0 or at the top, and the delay, all wet, is quieter than the dry; the feedback changes the length of the echoes and not the level (the send is scaled by it)
 {
   const loop = async (lanes, fx) => {
     const w = await device(); w.render(200);
     for (const k of lanes) { w.key(BLACK[k], 20); w.setSteps([...Array(16).keys()]); }
-    if (fx) { w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME); w.ex.web_set_fxparam(FX.DELAY, 7, fx.mix); w.ex.web_set_fxparam(FX.DELAY, 1, fx.fb); }
+    if (fx) {
+      w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME);
+      for (const [i, v] of [[7, fx.mix], [1, fx.fb], [2, fx.pong ? 96 : 0], [3, fx.sp]]) w.ex.web_set_fxparam(FX.DELAY, i, v);
+    }
     w.ex.web_buttons(1 << B.PLAY); w.render(2500);
     const c = w.cap(4000); w.ex.web_buttons(0);
-    let t = 0; for (let i = 0; i < c.l.length; i++) t += c.l[i] * c.l[i] + c.r[i] * c.r[i];
-    return Math.sqrt(t / (2 * c.l.length));
+    let t = 0, pk = 0; for (let i = 0; i < c.l.length; i++) { t += c.l[i] * c.l[i] + c.r[i] * c.r[i]; pk = Math.max(pk, Math.abs(c.l[i]), Math.abs(c.r[i])); }
+    return { rms: Math.sqrt(t / (2 * c.l.length)), pk };
   };
-  let worst = -99, wet = -99, spread = 0;
+  let worst = -99, wet = -99, spread = 0, worstp = -99;
+  const rows = [];
   for (const lanes of [[0], [0, 1, 2], [0, 1, 2, 3, 4, 5]]) {
     const dry = await loop(lanes, null);
-    {
+    for (const [pong, sp] of [[true, 100], [true, 0], [false, 100], [false, 0]]) {
       const byFb = [];
       for (const fb of [60, 127]) {
-        const mid = 20 * Math.log10((await loop(lanes, { mix: 51, fb })) / dry);
-        const all = 20 * Math.log10((await loop(lanes, { mix: 127, fb })) / dry);
-        worst = Math.max(worst, mid); wet = Math.max(wet, all); byFb.push(mid);
+        const m = await loop(lanes, { mix: 51, fb, pong, sp }), all = await loop(lanes, { mix: 127, fb, pong, sp });
+        const mid = 20 * Math.log10(m.rms / dry.rms), wt = 20 * Math.log10(all.rms / dry.rms);
+        worst = Math.max(worst, mid); wet = Math.max(wet, wt); byFb.push(mid);
+        worstp = Math.max(worstp, 20 * Math.log10(m.pk / dry.pk), 20 * Math.log10(all.pk / dry.pk));
       }
       spread = Math.max(spread, Math.abs(byFb[0] - byFb[1]));
+      rows.push(`${lanes.length}d ${pong ? "pp" : "--"} sp${sp}: ${byFb.map((x) => x.toFixed(1)).join("/")}`);
     }
   }
-  check(`DELAY open on every step, 1 / 3 / 6 drums: at 40 % the loop is at most ${worst.toFixed(1)} dB louder (under 4), all wet at most ${wet.toFixed(1)} dB (under 0), and feedback 60 against 127 differs by ${spread.toFixed(1)} dB (under 1)`,
-        worst < 4 && wet < 0 && spread < 1);
+  console.log("   (" + rows.join("; ") + ")");
+  check(`DELAY open on every step, 1 / 3 / 6 drums, PING PONG on and off, SPREAD 0 and 100: at 40 % the loop is at most ${worst.toFixed(1)} dB louder (under 4), all wet at most ${wet.toFixed(1)} dB (under 0), the peaks at most ${worstp.toFixed(1)} dB (under 4), and feedback 60 against 127 differs by ${spread.toFixed(1)} dB (under 1)`,
+        worst < 4 && wet < 0 && worstp < 4 && spread < 1);
 }
-// ---- the DELAY's TIME moved while it plays (the options one after the other) glides and does not click
+// ---- the DELAY's TIME moved while it plays (the options one after the other), or its SPREAD (PING PONG off: the right line's time), glides and does not click
 {
-  const run = async (move) => {
+  const run = async (pong, param, move) => {
     const w = await device(); w.render(200);
     w.key(BLACK[0], 20); w.setSteps([...Array(16).keys()]);
     w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME);
-    w.ex.web_set_fxparam(FX.DELAY, 7, 64); w.ex.web_set_fxparam(FX.DELAY, 1, 60); w.ex.web_set_fxparam(FX.DELAY, 0, 20);
+    for (const [i, v] of [[7, 64], [1, 60], [2, pong ? 96 : 0], [3, 20], [0, 20]]) w.ex.web_set_fxparam(FX.DELAY, i, v);
     w.ex.web_buttons(1 << B.PLAY); w.render(2500);
     const L = [], R = []; let v = 20;
-    for (let k = 0; k < 20; k++) { if (move) { v += 6; w.ex.web_set_fxparam(FX.DELAY, 0, v); } const c = w.cap(100); L.push(...c.l); R.push(...c.r); }
+    for (let k = 0; k < 20; k++) { if (move) { v += param === 3 ? 5 : 6; w.ex.web_set_fxparam(FX.DELAY, param, v); } const c = w.cap(100); L.push(...c.l); R.push(...c.r); }
     w.ex.web_buttons(0);
     let mx = 0; for (const X of [L, R]) for (let i = 3; i < X.length; i++) mx = Math.max(mx, Math.abs(X[i] - 3 * X[i - 1] + 3 * X[i - 2] - X[i - 3]));
     return mx;
   };
-  const held = await run(false), moved = await run(true);
-  check(`TIME moved through its options while it plays: the largest edge ${moved.toFixed(3)} against ${held.toFixed(3)} held`, moved < held * 2.5);
+  const sp0 = await run(false, 3, false), sp1 = await run(false, 3, true), t0 = await run(true, 0, false), t1 = await run(true, 0, true);
+  check(`DELAY SPREAD moved a click at a time with PING PONG off: the largest edge ${sp1.toFixed(3)} against ${sp0.toFixed(3)} held (it was 9 times that)`, sp1 < sp0 * 1.5);
+  check(`  TIME moved through its options while it plays: ${t1.toFixed(3)} against ${t0.toFixed(3)} held`, t1 < t0 * 2.5);
+}
+// ---- the DELAY with PING PONG off: one loop, the right side the same echoes SPREAD later at every repeat (it would be a loop of its own, drifting further each time)
+{
+  const w = await device(); w.render(200);
+  w.key(BLACK[7], 20); w.setSteps([0]);
+  w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME);
+  for (const [i, v] of [[7, 127], [1, 100], [2, 0], [3, 100]]) w.ex.web_set_fxparam(FX.DELAY, i, v);
+  w.ex.web_buttons(1 << B.PLAY); const c = w.cap(1700); w.ex.web_buttons(0);
+  const ol = onsetsOf(c.l, 8, 0.004), or = onsetsOf(c.r, 8, 0.004);
+  const lag = [1, 2, 3, 4].map((k) => or[k] - ol[k]);
+  check(`PING PONG off, feedback 100: the right echoes come ${lag.map((x) => x.toFixed(0)).join(", ")} ms after the left ones (the same each time, about half a step at SPREAD 100: 49)`,
+        ol.length >= 5 && or.length >= 5 && lag.every((x) => Math.abs(x - lag[0]) < 6) && Math.abs(lag[0] - 49) < 8);
+}
+// ---- the DELAY's SPREAD (PING PONG on) moves the echoes from the middle to the sides at the same power: an echo's level on its side changes by under 4 dB from SPREAD 0 to 127
+{
+  const pkOf = (c, t0, t1) => { let m = 0; for (let i = Math.round(t0 * 44.1); i < Math.round(t1 * 44.1); i++) m = Math.max(m, Math.abs(c[i])); return m; };
+  const first = async (sp) => {
+    const w = await device(); w.render(200);
+    w.key(BLACK[7], 20); w.setSteps([0]);
+    w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME);
+    for (const [i, v] of [[7, 127], [1, 60], [2, 96], [3, sp]]) w.ex.web_set_fxparam(FX.DELAY, i, v);
+    w.ex.web_buttons(1 << B.PLAY); const c = w.cap(400); w.ex.web_buttons(0);
+    return 20 * Math.log10(Math.max(pkOf(c.l, 245, 330), pkOf(c.r, 245, 330)));
+  };
+  const lv = []; for (const sp of [0, 40, 80, 127]) lv.push(await first(sp));
+  const spread = Math.max(...lv) - Math.min(...lv);
+  check(`the first echo's loudest side at SPREAD 0, 40, 80, 127: ${lv.map((x) => x.toFixed(1)).join(", ")} dB (${spread.toFixed(1)} dB apart; it was 6)`, spread < 4);
 }
 // ---- a pan does not make the sound louder: a hot mix, MASTER at the top, panned hard (the lanes' own PAN, the PAN effect) is as loud on its side as it is in the middle
 // (the chain used to bend the middle with a soft knee and not what a pan puts beside it: +3 dB of peak, more with a delay or a reverb on top)
