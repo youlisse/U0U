@@ -7,17 +7,38 @@
  *   as AMOUNT says (100 %: four), and DRIFT (0 to 100 %) moves every setting of every hit of the lane at random: the velocity (up to +-25 at 100 %),
  *   the nudge (+-6), the subdivision (+-1), the chance (+-25), the pitch (+-2), the decay, tone, extra and pan of EDIT 2 (+-2 notches). Each lane has its own AMOUNT, EVERY and DRIFT:
  *   the knobs write the selected lane's (SCOPE ALL: every lane's, to the same values), and a lane keeps mutating while another is selected.
+ *   The mutation is the pattern's own (dbx_arp.m[pattern]): another pattern has its own AMOUNT, EVERY and DRIFT, and mutates its second section too.
  *   The hits move with everything they have (velocity, nudge, subdivision, chance, pitch); the number of hits stays. It is the pattern that changes
  *   (and is saved): AMOUNT back to 0 keeps what it came to.
  * None of it is saved but its result: the pattern. */
 enum { AP_HITS, AP_ROT, AP_LEN, AP_ACC, AM_AMT, AM_EVERY, AM_SCOPE, AM_DRIFT, AP_NP };
 static struct {
     uint8_t p[AP_NP];                      /* page 1, and SCOPE (what the knobs of page 2 write: this lane, or all) */
-    uint8_t m[DBX_NLANE][4];               /* each lane's mutation: AMOUNT, EVERY, DRIFT at AM_* - AM_AMT (the third is not used: SCOPE is p's) */
+    uint8_t m[DBX_NPAT][DBX_NLANE][4];     /* each pattern's, each lane's mutation: AMOUNT, EVERY, DRIFT at AM_* - AM_AMT (the third is not used: SCOPE is p's) */
     uint32_t seen;                         /* the pass counted (dbx_seq.pass) */
     uint32_t n;                            /* the passes counted since the mutation settings were last touched */
     uint32_t rng;
-} dbx_arp = {{4, 0, 16, 0, 0, 0, 0, 0}, {{0}}, 0, 0, 0x6D2B79F5u};
+} dbx_arp = {{4, 0, 16, 0, 0, 0, 0, 0}, {{{0}}}, 0, 0, 0x6D2B79F5u};
+
+#define DBX_M(lane_i) (dbx_arp.m[dbx_seq.pe][(lane_i)])         /* the pattern shown's mutation of a lane */
+static void dbx_arp_copy(uint32_t src, uint32_t dst)
+{
+    uint32_t i, k;
+    for (i = 0; i < DBX_NLANE; i++)
+        for (k = 0; k < 4u; k++)
+            dbx_arp.m[dst][i][k] = dbx_arp.m[src][i][k];
+}
+static void dbx_arp_shift(uint32_t p)                         /* a pattern deleted: the later ones' settings move down, the last has none */
+{
+    uint32_t q, i, k;
+    for (q = p; q + 1u < DBX_NPAT; q++)
+        for (i = 0; i < DBX_NLANE; i++)
+            for (k = 0; k < 4u; k++)
+                dbx_arp.m[q][i][k] = dbx_arp.m[q + 1u][i][k];
+    for (i = 0; i < DBX_NLANE; i++)
+        for (k = 0; k < 4u; k++)
+            dbx_arp.m[DBX_NPAT - 1u][i][k] = 0;
+}
 
 static uint32_t dbx_arp_rand(void)
 {
@@ -50,7 +71,7 @@ static void dbx_arp_apply(uint32_t lane_i)         /* page 1: write the lane */
             DBX_E.steps[lane_i] &= (uint16_t)~(1u << s);
     }
     dbx_seq_flush(1u << lane_i);                   /* (what was queued of the lane does not play) */
-    dbx_touch_pat(dbx_seq.pe);
+    dbx_touch_pat(DBX_EV);
 }
 
 static void dbx_arp_move(dbx_pat_t *p, uint32_t lane_i, uint32_t from, uint32_t to)       /* a hit and all it has, from one step to another */
@@ -61,7 +82,7 @@ static void dbx_arp_move(dbx_pat_t *p, uint32_t lane_i, uint32_t from, uint32_t 
     p->chance[lane_i][to] = p->chance[lane_i][from];
     p->semi[lane_i][to] = p->semi[lane_i][from];
     {
-        uint32_t pat = (uint32_t)(p - dbx_seq.pat);
+        uint32_t pat = dbx_pat_idx(p);
         dbx_lk_set(pat, 0, lane_i, to, dbx_lk_get(pat, 0, lane_i, from));
         dbx_lk_set(pat, 1, lane_i, to, dbx_lk_get(pat, 1, lane_i, from));
         dbx_lk_set(pat, 2, lane_i, to, dbx_lk_get(pat, 2, lane_i, from));
@@ -82,10 +103,9 @@ static int32_t dbx_arp_wander(int32_t v, uint32_t range, uint32_t drift, int32_t
     return clamp(v + (int32_t)(dbx_arp_rand() % (2u * m + 1u)) - (int32_t)m, lo, hi);
 }
 
-static void dbx_arp_mutate_lane(dbx_pat_t *p, uint32_t lane_i)
+static void dbx_arp_mutate_lane(dbx_pat_t *p, const uint8_t *m, uint32_t lane_i)
 {
-    const uint8_t *m = dbx_arp.m[lane_i];
-    uint32_t t, s, w, n_on = 0, swaps = ((uint32_t)m[AM_AMT - AM_AMT] * 4u + 99u) / 100u, drift = m[AM_DRIFT - AM_AMT], pat = (uint32_t)(p - dbx_seq.pat);
+    uint32_t t, s, w, n_on = 0, swaps = ((uint32_t)m[AM_AMT - AM_AMT] * 4u + 99u) / 100u, drift = m[AM_DRIFT - AM_AMT], pat = dbx_pat_idx(p);
     for (s = 0; s < DBX_NSTEP; s++)
         n_on += (p->steps[lane_i] >> s) & 1u;
     if (n_on == 0u || n_on == DBX_NSTEP)
@@ -120,8 +140,8 @@ static void dbx_arp_mutate_lane(dbx_pat_t *p, uint32_t lane_i)
 /* the main loop, each frame: a pass has gone by while playing (the sequencer counts them, not the loops of SEQ) */
 static void dbx_arp_poll(void)
 {
-    uint32_t pass = dbx_seq.pass, i, any = 0;
-    dbx_pat_t *p = &dbx_seq.pat[dbx_seq.pp];
+    uint32_t pass = dbx_seq.pass, i, any = 0, pp = dbx_seq.pp, v = pp + DBX_NPAT * dbx_seq.cs;
+    dbx_pat_t *p = DBX_PATV(v);                    /* (the section that has begun: its first step started the pass) */
     if (pass == dbx_arp.seen)
         return;
     dbx_arp.seen = pass;
@@ -129,12 +149,12 @@ static void dbx_arp_poll(void)
         return;
     dbx_arp.n++;
     for (i = 0; i < DBX_NLANE; i++) {              /* every lane on its own: its AMOUNT or DRIFT on, and its EVERY come round */
-        const uint8_t *m = dbx_arp.m[i];
+        const uint8_t *m = dbx_arp.m[pp][i];
         if ((m[AM_AMT - AM_AMT] || m[AM_DRIFT - AM_AMT]) && dbx_arp.n % (1u << m[AM_EVERY - AM_AMT]) == 0u) {
-            dbx_arp_mutate_lane(p, i);
+            dbx_arp_mutate_lane(p, m, i);
             any = 1;
         }
     }
     if (any)
-        dbx_touch_pat(dbx_seq.pp);
+        dbx_touch_pat(v);
 }

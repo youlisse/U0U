@@ -81,7 +81,11 @@ static struct {
     uint32_t scope_t;                      /* when the oscilloscope was drawn last */
 } dbx_ui = {0, DIRTY_ALL, PAGE_LANE, 100, 0, 0, 0, 0, 0, 512 * 16, {0, 0}, {1, 1}, 0, 0, 0, 0, 0, 0};
 #define DBX_FXPAGE (dbx_ui.page == PAGE_FX1 || dbx_ui.page == PAGE_FX2)
-#define DBX_F (dbx_seq.fx[dbx_seq.pe])     /* the effects' steps of the pattern shown */
+#define DBX_F (*DBX_FXV(DBX_EV))           /* the effects' steps of the section shown */
+static uint32_t dbx_now_step(uint32_t s)               /* the playhead is on step s of what is shown (the other section of a pattern: it is not) */
+{
+    return dbx_seq.playing && dbx_seq.cur == s && (!((dbx_seq.two >> dbx_seq.pe) & 1u) || dbx_seq.cs == dbx_seq.vs);
+}
 
 /* ------------------------------------------------------------ input --- */
 static void dbx_master_poll(void)
@@ -127,11 +131,18 @@ static void dbx_clear_steps(uint32_t lane_i, uint32_t all)
         if (all || i == lane_i)
             DBX_E.steps[i] = 0;
     dbx_seq_flush(all ? 0xFFFFu : 1u << lane_i);        /* (what was queued does not play) */
-    dbx_touch_pat(dbx_seq.pe);
-    if (all) {                                          /* a whole pattern: its effects' steps too */
+    dbx_touch_pat(DBX_EV);
+    if (all) {                                          /* a whole pattern: its effects' steps too, and its second section is taken away */
         for (i = 0; i < DBX_NFX; i++)
             DBX_F.on[i] = 0;
         dbx_touch_fx();
+        dbx_sec_remove(dbx_seq.pe);
+        dbx_seq.vs = 0;
+        for (i = 0; i < DBX_NLANE; i++)
+            dbx_seq.pat[dbx_seq.pe].steps[i] = 0;
+        for (i = 0; i < DBX_NFX; i++)
+            dbx_seq.fx[dbx_seq.pe].on[i] = 0;
+        dbx_touch_pat(dbx_seq.pe);
     }
 }
 
@@ -146,26 +157,23 @@ static void dbx_reset_all(void)
     uint32_t pe = dbx_seq.pe, k;
     dbx_clear_steps(0, 1);
     for (k = 0; k < DBX_NLANE; k++)
-        lane[k].mute = 0;                               /* (the mutes are the project's, not a pattern's sound: all back) */
-    if (pe == dbx_snap.live) {                          /* the sound of the pattern shown is the live one: the kit, the lanes, the effects, the master page, the LFOs, ENV */
-        dbx_fx_init();
-        dbx_kit = 0;
-        dbx_kit_reset = 1;                              /* (the render starts the lanes over) */
-        dbx_lfo.p[0][LFO_RATE] = 5;
-        dbx_lfo.p[1][LFO_RATE] = 3;
-        dbx_lfo.p[0][LFO_AMT] = dbx_lfo.p[1][LFO_AMT] = 0;
-        dbx_lfo.p[0][LFO_SHAPE] = dbx_lfo.p[1][LFO_SHAPE] = 0;
-        dbx_lfo.p[0][LFO_PHASE] = dbx_lfo.p[1][LFO_PHASE] = 0;
-        for (k = 0; k < EV_NP; k++)
-            dbx_env.p[k] = EV_DEF[k];
-    } else
-        dbx_snap_default(&dbx_snap.s[pe]);               /* (the pattern waiting: its snapshot) */
+        lane[k].mute = 0;                               /* (the mutes are the project's: all back) */
+    dbx_fx_init();                                      /* the kit, the lanes, the effects, the master page, the LFOs, ENV: the project's sound, back to its state 0 */
+    dbx_kit = 0;
+    dbx_kit_reset = 1;                                  /* (the render starts the lanes over) */
+    dbx_lfo.p[0][LFO_RATE] = 5;
+    dbx_lfo.p[1][LFO_RATE] = 3;
+    dbx_lfo.p[0][LFO_AMT] = dbx_lfo.p[1][LFO_AMT] = 0;
+    dbx_lfo.p[0][LFO_SHAPE] = dbx_lfo.p[1][LFO_SHAPE] = 0;
+    dbx_lfo.p[0][LFO_PHASE] = dbx_lfo.p[1][LFO_PHASE] = 0;
+    for (k = 0; k < EV_NP; k++)
+        dbx_env.p[k] = EV_DEF[k];
     {
-        static const uint8_t ARP_DEF[AP_NP] = {4, 0, 16, 0, 0, 0, 0, 0};          /* (the project's: ARP and the swing) */
+        static const uint8_t ARP_DEF[AP_NP] = {4, 0, 16, 0, 0, 0, 0, 0};          /* (the project's: ARP; the pattern's: its mutation) */
         for (k = 0; k < AP_NP; k++)
             dbx_arp.p[k] = ARP_DEF[k];
         for (k = 0; k < DBX_NLANE; k++)
-            dbx_arp.m[k][0] = dbx_arp.m[k][1] = dbx_arp.m[k][3] = 0;
+            dbx_arp.m[pe][k][0] = dbx_arp.m[pe][k][1] = dbx_arp.m[pe][k][3] = 0;
     }
     dbx_seq.swing = 0;
     dbx_touch_set();
@@ -224,6 +232,50 @@ static void dbx_set_target(uint32_t lane_or_fx, uint32_t step)    /* the step SE
     dbx_ui.t_step = (uint8_t)step;
 }
 
+/* OCT-, OCT+ walk a pattern's two sections (what plays does not follow them: the section shown is the one that is edited). A pattern has one section at first: OCT-
+ * does nothing, OCT+ asks to double the track and a second OCT+ does it (the first section's steps are copied into the new one, which is then shown). With two,
+ * OCT+ and OCT- go from one to the other; OCT- in the first asks to take the second away, a second OCT- does it. Any other key, or a few seconds, drop the question. */
+#define DBX_OCT_ASK_MS 4000u
+enum { OCT_NONE, OCT_DOUBLE, OCT_DELETE };
+static struct { uint8_t ask; uint32_t t; } dbx_oct;
+static void dbx_oct_cancel(void)
+{
+    dbx_oct.ask = OCT_NONE;
+    dbx_ui.dirty |= DIRTY_ALL;                          /* (what the question covered) */
+}
+static void dbx_oct_press(uint32_t up)
+{
+    uint32_t two = (dbx_seq.two >> dbx_seq.pe) & 1u, pe = dbx_seq.pe;
+    if (dbx_oct.ask == OCT_DOUBLE && up) {              /* the second OCT+: yes */
+        dbx_oct_cancel();
+        dbx_sec_double(pe);
+        dbx_seq.vs = 1;
+    } else if (dbx_oct.ask == OCT_DELETE && !up) {      /* the second OCT-: yes */
+        dbx_oct_cancel();
+        dbx_sec_remove(pe);
+        dbx_seq.vs = 0;
+    } else if (dbx_oct.ask) {
+        dbx_oct_cancel();                               /* (the other one: no) */
+        return;
+    } else if (up && !two && !dbx_seq.vs) {
+        dbx_oct.ask = OCT_DOUBLE;
+        dbx_oct.t = fm1_ms;
+        dbx_ui.dirty |= DIRTY_ALL;
+        return;
+    } else if (!up && two && !dbx_seq.vs) {
+        dbx_oct.ask = OCT_DELETE;
+        dbx_oct.t = fm1_ms;
+        dbx_ui.dirty |= DIRTY_ALL;
+        return;
+    } else if (two)
+        dbx_seq.vs = up ? 1u : 0u;
+    else
+        return;                                         /* (one section: OCT- does nothing) */
+    dbx_ui.t_on = 0;                                    /* (its steps are others) */
+    dbx_ui.dirty |= DIRTY_LANE;
+    dbx_ui.sig = ~dbx_ui.sig;
+}
+
 static void dbx_ui_input(void)
 {
     uint32_t released, btn = fm1_input_edges(&released), pressed = fm1_input_note_edges(), k, h, st = 0;
@@ -263,11 +315,10 @@ static void dbx_ui_input(void)
         dbx_ui.dirty |= DIRTY_LANE;
         dbx_ui.sig = ~dbx_ui.sig;
     }
-    if (btn & (PANEL_BTN(B_OCTUP) | PANEL_BTN(B_OCTDN))) {   /* OCT-, OCT+: the previous, the next pattern, round (it waits for the pass while playing) */
-        dbx_pat_select((dbx_seq.pe + ((btn & PANEL_BTN(B_OCTUP)) ? 1u : DBX_NPAT - 1u)) % DBX_NPAT);
-        dbx_ui.t_on = 0;                                        /* (its steps are others) */
-        dbx_ui.dirty |= DIRTY_LANE;
-    }
+    if (btn & (PANEL_BTN(B_OCTUP) | PANEL_BTN(B_OCTDN)))     /* OCT-, OCT+: the pattern's first and second section (the track doubled, or not) */
+        dbx_oct_press((btn & PANEL_BTN(B_OCTUP)) != 0u);
+    else if (dbx_oct.ask && (btn || pressed || fm1_ms - dbx_oct.t > DBX_OCT_ASK_MS))
+        dbx_oct_cancel();                                       /* (the question is dropped: any other key, or the time) */
     if (btn & PANEL_BTN(B_SEQ)) {
         dbx_seq_t = fm1_ms;
         dbx_seq_used = 0;
@@ -324,7 +375,7 @@ static void dbx_ui_input(void)
                     dbx_arp.p[q + n] = ARP_DEF[q + n];
                 for (n = 0; q && n < DBX_NLANE; n++)            /* (MUTATE: this lane's, or every lane's if SCOPE was ALL; SCOPE goes back to this lane) */
                     if (all || n == i)
-                        dbx_arp.m[n][0] = dbx_arp.m[n][1] = dbx_arp.m[n][3] = 0;
+                        dbx_arp.m[dbx_seq.pe][n][0] = dbx_arp.m[dbx_seq.pe][n][1] = dbx_arp.m[dbx_seq.pe][n][3] = 0;
                 dbx_arp.n = 0;
                 dbx_ui.dirty |= DIRTY_LANE;
             } else if (h == 1u)
@@ -363,7 +414,7 @@ static void dbx_ui_input(void)
                         if (!((DBX_E.steps[i] >> s) & 1u)) {
                             DBX_E.steps[i] |= (uint16_t)(1u << s);
                             dbx_step_defaults(&DBX_E, i, s);
-                            dbx_touch_pat(dbx_seq.pe);
+                            dbx_touch_pat(DBX_EV);
                         }
                         dbx_set_target(i, s);           /* (SELECT sets its velocity) */
                     }
@@ -412,12 +463,12 @@ static void dbx_ui_input(void)
                 dbx_preview(i, st);
         } else if ((DBX_E.steps[i] >> st) & 1u) {     /* on: off (EDIT: the picked step again) */
             DBX_E.steps[i] &= (uint16_t)~(1u << st);
-            dbx_touch_pat(dbx_seq.pe);
+            dbx_touch_pat(DBX_EV);
             dbx_ui.dirty |= DIRTY_LANE;
         } else {                                        /* off: on, as a new step, and the one SELECT edits */
             DBX_E.steps[i] |= (uint16_t)(1u << st);
             dbx_step_defaults(&DBX_E, i, st);
-            dbx_touch_pat(dbx_seq.pe);
+            dbx_touch_pat(DBX_EV);
             dbx_set_target(i, st);
             dbx_ui.dirty |= DIRTY_LANE;
             if (!dbx_seq.playing)
@@ -473,7 +524,7 @@ static void dbx_ui_input(void)
     } else if (s_sel != 0 && dbx_target(&st)) {         /* the velocity of the step just placed */
         uint8_t *v = &DBX_E.vel[i][st];
         *v = (uint8_t)clamp((int32_t)*v + s_sel * 4, 1, 127);
-        dbx_touch_pat(dbx_seq.pe);
+        dbx_touch_pat(DBX_EV);
         if (!dbx_seq.playing)
             dbx_preview(i, st);                         /* (heard at its new level) */
     }
@@ -559,14 +610,14 @@ static void dbx_ui_input(void)
                 dbx_arp_apply(i);
                 dbx_ui.t_on = 0;
             } else {
-                uint8_t *m = dbx_arp.m[i], a = (uint8_t)clamp((int32_t)m[0] + s_k[0] * 5, 0, 100), e = (uint8_t)clamp((int32_t)m[1] + s_k[1], 0, 3),
+                uint8_t *m = dbx_arp.m[dbx_seq.pe][i], a = (uint8_t)clamp((int32_t)m[0] + s_k[0] * 5, 0, 100), e = (uint8_t)clamp((int32_t)m[1] + s_k[1], 0, 3),
                         d = (uint8_t)clamp((int32_t)m[3] + s_k[3] * 5, 0, 100);
                 q[2] = (uint8_t)clamp((int32_t)q[2] + s_k[2], 0, 1);                                /* SCOPE: this lane, or all */
                 for (k = 0; k < DBX_NLANE; k++)                                                     /* AMOUNT, EVERY, DRIFT: the lane's own */
                     if (q[2] || k == i) {
-                        dbx_arp.m[k][0] = a;
-                        dbx_arp.m[k][1] = e;
-                        dbx_arp.m[k][3] = d;
+                        dbx_arp.m[dbx_seq.pe][k][0] = a;
+                        dbx_arp.m[dbx_seq.pe][k][1] = e;
+                        dbx_arp.m[dbx_seq.pe][k][3] = d;
                     }
                 dbx_arp.n = 0;
             }
@@ -643,7 +694,7 @@ static void dbx_ui_input(void)
                 if (first == DBX_NSTEP)
                     first = s;
                 for (k = 0; k < 4u; k++)
-                    dbx_lk_set(dbx_seq.pe, k, i, s, dbx_lk_get(dbx_seq.pe, k, i, s) + s_k[k]);
+                    dbx_lk_set(DBX_EV, k, i, s, dbx_lk_get(DBX_EV, k, i, s) + s_k[k]);
             }
             if (first != DBX_NSTEP) {
                 if (s_k[0] | s_k[1])
@@ -671,7 +722,7 @@ static void dbx_ui_input(void)
                 DBX_E.semi[i][s] = (int8_t)clamp(DBX_E.semi[i][s] + s_k[3], -DBX_PITCH_MAX, DBX_PITCH_MAX);
             }
             if (first != DBX_NSTEP) {
-                dbx_touch_pat(dbx_seq.pe);
+                dbx_touch_pat(DBX_EV);
                 dbx_ui.dirty |= DIRTY_LANE;
                 if (!dbx_seq.playing)
                     dbx_preview(i, first);              /* (heard as it will play: its hits and its pitch) */
@@ -713,7 +764,7 @@ static void dbx_led_key(uint8_t *arr, uint32_t id)      /* set the LED of key / 
 static void dbx_ui_leds(void)
 {
     uint8_t lit[FM1_NCOL] = {0}, dim[FM1_NCOL] = {0}, mid[FM1_NCOL] = {0}, breath[FM1_NCOL] = {0};
-    uint32_t k, c, playing = dbx_seq.playing, cur = dbx_seq.cur;
+    uint32_t k, c, playing = dbx_seq.playing;
     for (k = 0; k < DBX_NKEY; k++) {
         uint32_t on = (fm1_in.notes >> k) & 1u;
         dbx_led_key(dim, 14u + k);                      /* the idle glow */
@@ -739,7 +790,7 @@ static void dbx_ui_leds(void)
                     dbx_led_key(mid, 14u + k);
             } else {
                 uint32_t step_on = ((DBX_FXPAGE ? DBX_F.on[dbx_ui.fxsel] : DBX_E.steps[dbx_ui.sel]) >> st) & 1u;
-                on |= step_on ^ (playing && cur == st); /* the playhead inverts its step */
+                on |= step_on ^ dbx_now_step(st);       /* the playhead inverts its step */
             }
         }
         if (on)
@@ -915,7 +966,9 @@ static void dbx_draw_head(void)                         /* the pattern, PLAY / S
             dbx_cat(b, " BPM");
     }
     dbx_cat_int(t, (int32_t)dbx_seq.pe + 1);
-    draw_text_line(12, HEAD_Y, 76, &AF_S, t, T_MID, T_BG, 0);
+    if ((dbx_seq.two >> dbx_seq.pe) & 1u)
+        dbx_cat(t, dbx_seq.vs ? "B" : "A");                 /* (a doubled track: its first or second section) */
+    draw_text_line(12, HEAD_Y, 78, &AF_S, t, T_MID, T_BG, 0);
     if (dbx_erased_now()) {
         gfx_colour = 1;
         draw_text_line(90, HEAD_Y, 56, &AF_S, dbx_reset_note == 2u ? "DELETED" : dbx_reset_note ? "RESET" : "ERASED", DBX_RED_LIGHT, T_BG, 1);
@@ -940,8 +993,8 @@ static uint32_t dbx_edit_values(uint32_t f0, uint32_t n, int32_t *val, uint32_t 
 static int dbx_step_edited(uint32_t i, uint32_t s)      /* a step with something set besides its velocity */
 {
     return DBX_E.nudge[i][s] != 0 || DBX_E.ratchet[i][s] != 1u || DBX_E.chance[i][s] != 100u ||
-           DBX_E.semi[i][s] != 0 || dbx_lk_get(dbx_seq.pe, 0, i, s) != 0 || dbx_lk_get(dbx_seq.pe, 1, i, s) != 0 ||
-           dbx_lk_get(dbx_seq.pe, 2, i, s) != 0 || dbx_lk_get(dbx_seq.pe, 3, i, s) != 0;
+           DBX_E.semi[i][s] != 0 || dbx_lk_get(DBX_EV, 0, i, s) != 0 || dbx_lk_get(DBX_EV, 1, i, s) != 0 ||
+           dbx_lk_get(DBX_EV, 2, i, s) != 0 || dbx_lk_get(DBX_EV, 3, i, s) != 0;
 }
 
 static void dbx_draw_grid(void)                         /* the selected lane's (or effect's) 16 steps: bars, playhead */
@@ -950,7 +1003,7 @@ static void dbx_draw_grid(void)                         /* the selected lane's (
     uint32_t bits = fxp ? DBX_F.on[e] : DBX_E.steps[dbx_ui.sel];
     lcd_fill(11, GRID_Y - 1u, 218, GRID_H + 6u, T_BG);                         /* (the gaps, and the mark under the step picked, clean) */
     for (s = 0; s < DBX_NSTEP; s++) {
-        uint32_t x = dbx_cell_x(s), y = GRID_Y, now = dbx_seq.playing && dbx_seq.cur == s;
+        uint32_t x = dbx_cell_x(s), y = GRID_Y, now = dbx_now_step(s);
         lcd_fill(x, y, GCELL, GRID_H, now ? DBX_RED_PLAY : s % 4u == 0u ? T_RAISE : T_SURF);   /* the playhead's cell is lit whole (red) */
         if ((bits >> s) & 1u) {
             if (fxp) {                                                     /* an effect's step: its mix is the height */
@@ -1591,7 +1644,7 @@ static void dbx_draw_arp_page(void)                     /* ARP 1 (EUCLID): HITS 
         dbx_row(3, "ACCENT", v, (uint32_t)q[AP_ACC] * 216u / 100u);
         return;
     }
-    const uint8_t *m = dbx_arp.m[dbx_ui.sel];           /* (the selected lane's own) */
+    const uint8_t *m = dbx_arp.m[dbx_seq.pe][dbx_ui.sel];           /* (the selected lane's own) */
     draw_text_line(12, TITLE_Y, 216, &AF_L, "ARP 2 MUTATE", T_THEME, T_BG, 0);
     if (m[0] == 0u)
         dbx_cat(v, "OFF");
@@ -1646,7 +1699,7 @@ static void dbx_draw_arp_view(void)
         cv_line_t(px, py, fx, fy, line, 1);
     for (s = 0; s < DBX_NSTEP; s++) {
         int32_t x = cx + SINE[s * 64u] * rad / 32767, y = cy - SINE[(s * 64u + 256u) & 1023u] * rad / 32767;
-        uint32_t on = (steps >> s) & 1u, now = dbx_seq.playing && dbx_seq.cur == s;
+        uint32_t on = (steps >> s) & 1u, now = dbx_now_step(s);
         if (now)
             cv_rect(x - 4, y - 4, 9, 9, DBX_RED_PLAY);
         if (on)
@@ -1659,7 +1712,7 @@ static void dbx_draw_arp_view(void)
         dbx_cat_int(r, (int32_t)n_on);
         dbx_cat(r, n_on == 1u ? " HIT" : " HITS");
     } else {
-        const uint8_t *m = dbx_arp.m[dbx_ui.sel];
+        const uint8_t *m = dbx_arp.m[dbx_seq.pe][dbx_ui.sel];
         uint32_t every = 1u << m[1], left = every - dbx_arp.n % every;
         dbx_cat(b, dbx_arp.p[AM_SCOPE] ? "ALL LANES" : DBX_NAME[dbx_ui.sel]);
         if (m[0] || m[3]) {
@@ -1746,7 +1799,7 @@ static int32_t dbx_edit_field(uint32_t i, uint32_t s, uint32_t f)
     case 1: return DBX_E.ratchet[i][s];
     case 2: return DBX_E.chance[i][s];
     case 3: return DBX_E.semi[i][s];
-    case 4: case 5: case 6: case 7: return dbx_lk_get(dbx_seq.pe, f - 4u, i, s) * DBX_LK_UNIT[f - 4u];
+    case 4: case 5: case 6: case 7: return dbx_lk_get(DBX_EV, f - 4u, i, s) * DBX_LK_UNIT[f - 4u];
     default: return 0;
     }
 }
@@ -1823,7 +1876,7 @@ static uint32_t dbx_pat_sig(void)                       /* what the pattern page
     uint32_t p, used = 0;
     for (p = 0; p < DBX_NPAT; p++)
         used |= dbx_pat_used(p) << p;
-    return used * 31u + (uint32_t)dbx_seq.pe * 7u + (uint32_t)dbx_seq.pq * 3u + dbx_seq.pp + (uint32_t)dbx_seq.playing * 1000u;
+    return used * 31u + (uint32_t)dbx_seq.pe * 7u + (uint32_t)dbx_seq.pq * 3u + dbx_seq.pp + (uint32_t)dbx_seq.playing * 1000u + dbx_seq.two * 65537u;
 }
 
 static void dbx_draw_pat_page(void)                     /* SAVE: the 16 patterns, 2 x 8 */
@@ -1842,6 +1895,8 @@ static void dbx_draw_pat_page(void)                     /* SAVE: the 16 patterns
         lcd_fill(x - 1u, y - 1u, PCELL_W + 2u, PCELL_H + 2u, wait ? T_ACCENT : T_BG);   /* outlined: it plays, or will */
         lcd_fill(x, y, PCELL_W, PCELL_H, bg);
         draw_text_line(x, y + 3u, PCELL_W, &AF_S, n, fg, bg, 1);
+        if ((dbx_seq.two >> p) & 1u)
+            lcd_fill(x + 5u, y + PCELL_H - 3u, PCELL_W - 10u, 2, fg);        /* (a doubled track: a bar under its number) */
     }
     {
         char m[32] = "";
@@ -1865,7 +1920,7 @@ static const char *const HELP_L[3][13] = {
     {"SELECT", "ALGO", "PRESETS", "K1 - K4", "MASTER", "GLO 2 K4", "GLO 1", "GLO 2", "KICK TUNE", "", "", "", ""},
 };
 static const char *const HELP_T[3][13] = {
-    {"EFFECTS (2 PAGES)", "HPF LPF OTT CLIP", "DUCK / ATK DEC GATE", "VOLUME / PAN LFO", "STEP, LANE, STEP SND", "TEMPO.. / SWING KIT", "PATTERNS / SONG", "EUCLID / MUTATE", "TAP HELP, HOLD LOOP", "KEYS SOUND + WRITE", "PATTERN - / +", "START / STOP", "CLOSE A PAGE"},
+    {"EFFECTS (2 PAGES)", "HPF LPF OTT CLIP", "DUCK / ATK DEC GATE", "VOLUME / PAN LFO", "STEP, LANE, STEP SND", "TEMPO.. / SWING KIT", "PATTERNS / SONG", "EUCLID / MUTATE", "TAP HELP, HOLD LOOP", "KEYS SOUND + WRITE", "TRACK 1 / 2", "START / STOP", "CLOSE A PAGE"},
     {"FULL RESET", "CLEAR LANE / PAGE", "SAVE NOW", "MUTE THE LANE", "SOLO THE LANE", "LOOP THE LAST BEAT", "THE LOOP'S LENGTH", "TAP: NEXT PAGE", "THE 16 STEPS", "THE 11 DRUMS", "", "", ""},
     {"VELOCITY / FX MIX", "PAN / EFFECT (FX)", "SCROLL THE STEPS", "THE 4 ROWS", "OUTPUT LEVEL", "FULL TURN: RESET", "BPM VOL SYNC SUB", "SWING MIX KIT", "SHOWN AS A NOTE", "", "", "", ""},
 };
@@ -1997,7 +2052,7 @@ static void dbx_logo(uint32_t x0, uint32_t y0)
 
 static void dbx_ui_draw(void)
 {
-    static uint8_t drawn_page, splash, seen_live = 255;
+    static uint8_t drawn_page, splash;
     if (fm1_ms - dbx_ms0 < DBX_SPLASH_MS) {             /* the boot screen: the logo, the name, by whom, nothing else */
         if (!splash) {
             splash = 1;
@@ -2026,10 +2081,6 @@ static void dbx_ui_draw(void)
             dbx_ui.dirty |= DIRTY_ALL;
         }
     }
-    if (dbx_snap.live != seen_live) {                   /* the sound of another pattern is live: the pages show its values */
-        seen_live = dbx_snap.live;
-        dbx_ui.dirty |= DIRTY_LANE;
-    }
     if (splash) {                                       /* ... then the page, whole */
         splash = 0;
         dbx_ui.dirty |= DIRTY_ALL;
@@ -2045,7 +2096,8 @@ static void dbx_ui_draw(void)
           ((uint32_t)dbx_seq.bpm << 1) ^ vs * 0x9E3779B1u ^ ((uint32_t)dbx_seq.div << 20) ^
           ((uint32_t)dbx_seq.ext << 28) ^ ((uint32_t)dbx_seq_locked() << 29) ^ (tg << 30) ^ (st << 24) ^ ed ^
           (dbx_saved_now() ? 0x80000000u : 0u) ^ ((uint32_t)dbx_seq.pe << 4) ^ (dbx_erased_now() ? 0x40000000u : 0u) ^
-          ((uint32_t)dbx_batt.lvl * 0x1F3D5B79u) ^ (dbx_usb_powered() * 0x2545F491u) ^ ((uint32_t)dbx_seq.pl_lock * 0x3C6EF372u);
+          ((uint32_t)dbx_batt.lvl * 0x1F3D5B79u) ^ (dbx_usb_powered() * 0x2545F491u) ^ ((uint32_t)dbx_seq.pl_lock * 0x3C6EF372u) ^
+          ((uint32_t)dbx_seq.vs * 0x2F0B4A13u) ^ ((uint32_t)dbx_seq.cs * 0x13579BDFu) ^ ((uint32_t)((dbx_seq.two >> dbx_seq.pe) & 1u) * 0x6A09E667u);
     if (dbx_ui.dirty) {
         uint32_t all = dbx_ui.dirty & DIRTY_ALL;
         dbx_ui.dirty = 0;
@@ -2110,7 +2162,19 @@ static void dbx_ui_draw(void)
         dbx_ui.psig = dbx_pat_sig();
         dbx_draw_pat_page();
     }
-    if (dbx_ui.page != PAGE_HELP && fm1_ms - dbx_ui.scope_t >= 30u) {              /* the oscilloscope (not under the help): every other frame, ~33 times a second (the panel takes ~20 ms) */
+    {   /* the question OCT asks (double the track, take the second part away), over the oscilloscope's place; the scope waits */
+        static uint8_t asked;
+        if (dbx_oct.ask && dbx_oct.ask != asked) {
+            uint32_t dbl = dbx_oct.ask == OCT_DOUBLE;
+            asked = dbx_oct.ask;
+            lcd_fill(SCOPE_X, SCOPE_Y, SCOPE_W, SCOPE_H, T_RAISE);
+            draw_text_line(SCOPE_X, SCOPE_Y + 8u, SCOPE_W, &AF_M, dbl ? "DOUBLE THE TRACK?" : "DELETE THE 2ND PART?", T_THEME, T_RAISE, 1);
+            draw_text_line(SCOPE_X, SCOPE_Y + 34u, SCOPE_W, &AF_S, dbl ? "OCT+ AGAIN: YES" : "OCT- AGAIN: YES", T_TEXT, T_RAISE, 1);
+            draw_text_line(SCOPE_X, SCOPE_Y + 51u, SCOPE_W, &AF_S, "ANY OTHER KEY: NO", T_MID, T_RAISE, 1);
+        } else if (!dbx_oct.ask)
+            asked = 0;
+    }
+    if (dbx_ui.page != PAGE_HELP && !dbx_oct.ask && fm1_ms - dbx_ui.scope_t >= 30u) {              /* the oscilloscope (not under the help): every other frame, ~33 times a second (the panel takes ~20 ms) */
         dbx_ui.scope_t = fm1_ms;
         if (dbx_ui.page == PAGE_LFO1 || dbx_ui.page == PAGE_LFO2)
             dbx_draw_lfo_view();                        /* (an LFO page: its picture in the oscilloscope's place) */

@@ -1,21 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* DrumBox sounds per pattern: each of the 16 patterns has its own SOUND, a snapshot of what the kit, the effects and the master page are set to:
- *   the kit (CLASSIC, ANALOG ...) and every lane's TUNE, DECAY, TONE, EXTRA, LEVEL and mute,
- *   every effect's 8 parameters and the FX MIX of GLO page 2,
- *   the master page (HPF, LPF, OTT, CLIP),
- *   the two LFOs (RATE, AMOUNT, SHAPE, PHASE) and ENV (its 8 values).
- * The tempo, the subdivision, the volume, the swing and ARP are the project's and are not here.
- * The sound that plays is the live one (the parameters the pages show and the audio reads); a snapshot is where a pattern's sound waits.
- *   - the live sound is the PLAYING pattern's (stopped: the one shown): the knobs set it, and it is taken into the pattern's snapshot when the
- *     pattern is left (and when it is saved);
- *   - the pattern that plays changes (a pass ends and the waiting one comes in, a pattern is picked while stopped, PLAY from the shown one):
- *     the live sound is taken into the snapshot of the one that leaves and the snapshot of the one that comes becomes the live sound. That is done
- *     by the audio ISR, at the step where the new pattern's first step begins (stopped: at once), so that the last hits of the old pattern keep their
- *     sound and the first of the new one has its own;
- *   - copying a pattern copies its sound; resetting the one shown resets its sound;
- *   - what is saved before this (one sound for all) is read as the same sound in all 16.
- * The effects' own state (the delay line, the reverb) is not part of it: a tail rings out across the change. A change of kit starts the lanes'
- * voices over (the drums change), as picking a kit does. */
+/* DrumBox sound: one for the whole project, the same under every pattern: the kit (CLASSIC, ANALOG ...) and every lane's TUNE, DECAY, TONE, EXTRA, LEVEL
+ * and mute, every effect's 8 parameters and the FX MIX of GLO page 2, the master page (HPF, LPF, OTT, CLIP), the two LFOs (RATE, AMOUNT, SHAPE, PHASE) and
+ * ENV (its 8 values); with the tempo, the subdivision, the volume, the swing and ARP's own settings. What belongs to a pattern is its steps (and their
+ * effects' steps and own values) and its mutation. The live sound (the parameters the pages show and the audio reads) is saved as one snapshot.
+ * The object that holds it was 16 snapshots, one a pattern (before the sound was the project's): it is still written that way (the same one 16 times), so
+ * that what is read is the same either way, and an older save is read as its pattern shown's sound. */
 typedef struct { int16_t tune; uint8_t decay, tone, extra, level, accent; int8_t pan; uint8_t choke, pad; } dbx_snap_lane_t;   /* 10 */
 typedef struct {
     dbx_snap_lane_t k[DBX_NLANE];          /* 110 */
@@ -32,9 +21,7 @@ static struct {
     uint32_t magic;                        /* (the first of what is saved: the magic, the 16 snapshots, then the song) */
     dbx_snap_t s[DBX_NPAT];
     uint8_t song[40];                      /* the chain of patterns (dbx_song.c) */
-    uint8_t live;                          /* the pattern whose sound is the live one (255: none yet) */
-    volatile uint8_t reload;               /* the live sound is to be replaced by the playing pattern's snapshot, as it is (a copy onto it) */
-} dbx_snap = {0, {{{{0}}}}, {0}, 255, 0};
+} dbx_snap = {0, {{{{0}}}}, {0}};
 #define DBX_SNAP_BYTES (4u + (uint32_t)sizeof(dbx_snap_t) * DBX_NPAT + 40u)
 
 static void dbx_snap_take(dbx_snap_t *d)                    /* the live sound into d */
@@ -132,27 +119,7 @@ static void dbx_snap_default(dbx_snap_t *d)                  /* a sound at its s
         d->env[i] = EV_DEF[i];
 }
 
-/* the live sound is the one of the pattern that plays: if that changed, swap (the audio ISR, see above) */
-static void dbx_snap_sync(void)
-{
-    uint32_t pp = dbx_seq.pp;
-    if (pp >= DBX_NPAT)
-        return;
-    if (dbx_snap.reload) {
-        dbx_snap.reload = 0;
-        dbx_snap_give(&dbx_snap.s[pp]);
-        dbx_snap.live = (uint8_t)pp;
-        return;
-    }
-    if (dbx_snap.live == pp)
-        return;
-    if (dbx_snap.live < DBX_NPAT)
-        dbx_snap_take(&dbx_snap.s[dbx_snap.live]);
-    dbx_snap_give(&dbx_snap.s[pp]);
-    dbx_snap.live = (uint8_t)pp;
-}
-
-static void dbx_snap_flush(void)                             /* the live sound into its pattern's snapshot (before saving, or copying), and the song beside them */
+static void dbx_snap_flush(void)                             /* the live sound into the snapshots (the same 16 times), and the song beside them */
 {
     uint32_t k;
     for (k = 0; k < DBX_NPAT; k++) {
@@ -160,27 +127,9 @@ static void dbx_snap_flush(void)                             /* the live sound i
         dbx_snap.song[16u + k] = (uint8_t)(dbx_song.rep[k] | (dbx_song.again[k] / 5u) << 2);      /* (the passes in 2 bits, the AGAIN in fives above them) */
     }
     dbx_snap.song[32] = dbx_song.on;
-    if (dbx_snap.live < DBX_NPAT)
-        dbx_snap_take(&dbx_snap.s[dbx_snap.live]);
-}
-
-static void dbx_snap_copy(uint32_t src, uint32_t dst)        /* a pattern copied: its sound too */
-{
-    dbx_snap_flush();
-    dbx_snap.s[dst] = dbx_snap.s[src];
-    if (dst == dbx_snap.live)
-        dbx_snap.reload = 1;                                 /* (the copy is to be heard) */
-}
-
-static void dbx_snap_remove(uint32_t p)                      /* a pattern deleted: the sounds after it move down, the 16th is at state 0 */
-{
-    uint32_t q;
-    dbx_snap_flush();                                        /* (the live sound into its pattern's first) */
-    for (q = p; q + 1u < DBX_NPAT; q++)
-        dbx_snap.s[q] = dbx_snap.s[q + 1u];
-    dbx_snap_default(&dbx_snap.s[DBX_NPAT - 1u]);
-    dbx_snap.live = 255;                                     /* (the numbers moved: the live sound is the playing pattern's snapshot, as it now is) */
-    dbx_snap.reload = 1;
+    dbx_snap_take(&dbx_snap.s[0]);
+    for (k = 1; k < DBX_NPAT; k++)
+        dbx_snap.s[k] = dbx_snap.s[0];
 }
 
 /* a sound of an older object (entry bytes: 184 from DBXS, 200 from DBXT) as today's: the lanes get no ACCENT, no PAN and the hats' choke group */

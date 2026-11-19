@@ -3,7 +3,7 @@
 A drum machine firmware for the **M-VAVE FM-1**: a step sequencer coupled with a step FX engine.
 
 The 16 white keys are the 16 steps, the 11 black keys are the 11 drums. On the master bus every effect has its own 16 steps, so each
-one lands on the beats you choose. Synthesized drums (9 kits), per-step timing, roll, chance and pitch, 16 patterns that chain into a
+one lands on the beats you choose. Synthesized drums (9 kits), per-step timing, roll, chance and pitch, 16 patterns (each 16 or 32 steps) that chain into a
 song, two LFOs, Euclidean rhythms with mutation, and the computer's MIDI clock over USB. It runs from the FM-1's own audio output;
 nothing is sampled.
 
@@ -27,7 +27,7 @@ nothing is sampled.
 | **GLO** | tempo, volume, MIDI clock (follow the computer), swing, effects mix, kit, reset |
 | **SAVE** | the 16 patterns (hold one, tap another: copy; EDIT held: delete, the next ones move down), tap twice for the song. Held: save now |
 | **SEQ** | tap: help (3 sheets). Held while playing: loop the last beat |
-| **OCT- / OCT+** | previous / next pattern. Both held 5 s: leave U0U |
+| **OCT- / OCT+** | the two sections of the pattern (a track of 16 or 32 steps): OCT+ twice doubles it, OCT+ / OCT- go from one section to the other, OCT- twice in the first takes the second away. Both held 5 s: leave U0U |
 
 The screen shows a battery at the top (a bolt when USB powers the FM-1). Following the computer: GLO page 1, KNOB 3 to the right; the
 SYNC row says `PC LOCKED` when the clock is steady. In Ableton Live: Preferences, Link/Tempo/MIDI, switch **Sync** on for the FM-1's
@@ -43,7 +43,7 @@ DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib JIELI_TOOLCHAIN=$HOME/.jieli/toolch
   AC79_SDK=$HOME/fw-AC79_AIoT_SDK python3 tools/build.py        # -> build/u0u.fwsc
 sh web/emu/build_drumbox.sh                                    # the browser build (needs Emscripten)
 node web/emu/drumbox_test.mjs                                  # the emulator's checks
-python3 web/make_site.py build/u0u.fwsc 0.1 site              # the site: emulator, installer, package
+python3 web/make_site.py build/u0u.fwsc 0.2 site              # the site: emulator, installer, package
 ```
 
 `firmware/src/drumbox.c` (with `dbx_main.c`) is the root of the build, `firmware/drumbox.ld` its memory map. The design notes, with

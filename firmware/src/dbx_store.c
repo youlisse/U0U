@@ -4,6 +4,8 @@
  * in storage.c's A/B sector objects (a save goes to the other copy, the commit record last: a power cut leaves the
  * previous one). Four patterns to an object (OBJ_PROJECT0..3, 0x97000..0x9EFFF); the settings in OBJ_SETTINGS (0xFC000).
  * Both start with a magic of their own, so what an earlier firmware left in those sectors is not read as ours.
+ * The second sections of the patterns (OBJ_SECB0..6, 0xA0000.., the same layouts as the first ones: four patterns, the effects' steps, the two
+ * objects of the steps' own values) are read for the patterns whose flag is set, in the first objects' spare word (pad, bits 0..3).
  * Saving erases a sector, which stops the audio for a moment on the FM-1: it is done a moment after the last change
  * (dbx_touch_*), one object a call, and never while playing. */
 #define DBX_SET_MAGIC 0x31584244u                      /* "DBX1" */
@@ -31,6 +33,9 @@ typedef struct { uint32_t magic, pad; uint8_t p[DBX_NFX][DBX_NFXP]; dbx_fxpat_t 
 _Static_assert(sizeof(dbx_fxobj_t) <= ST_PAYLOAD_MAX, "the effects fit a storage object");
 _Static_assert(sizeof(dbx_patobj_t) <= ST_PAYLOAD_MAX, "four patterns fit a storage object");
 _Static_assert(sizeof dbx_lk2 <= ST_PAYLOAD_MAX, "the steps' own EXTRA and PAN fit a storage object");
+#define OBJ_SEC_FX (OBJ_SECB0 + 4u)
+#define OBJ_SEC_LK (OBJ_SECB0 + 5u)
+#define OBJ_SEC_LK2 (OBJ_SECB0 + 6u)
 _Static_assert(DBX_NPAT == 4u * DBX_PAT_PER_OBJ / 1u && DBX_NPAT / DBX_PAT_PER_OBJ == 4u, "four pattern objects");
 
 static dbx_setobj_t dbx_sobj;
@@ -53,7 +58,7 @@ static void dbx_pat_sanitize(dbx_pat_t *p)             /* what was stored may be
 /* power-on (after dbx_seq_init and dbx_voices_init): what the flash holds, where it is whole and ours */
 static void dbx_store_load(void)
 {
-    uint32_t i, k;
+    uint32_t i, k, flags = 0;
     if (st_load(OBJ_SETTINGS, &dbx_sobj, sizeof dbx_sobj) == (int)sizeof dbx_sobj && dbx_sobj.magic == DBX_SET_MAGIC) {
         dbx_seq.bpm = (uint16_t)clamp(dbx_sobj.bpm, (int32_t)DBX_BPM_MIN, (int32_t)DBX_BPM_MAX);
         dbx_seq.div = dbx_sobj.div == 8u || dbx_sobj.div == 32u ? dbx_sobj.div : 16u;
@@ -82,11 +87,22 @@ static void dbx_store_load(void)
         }
     }
     for (k = 0; k < DBX_NPAT / DBX_PAT_PER_OBJ; k++)
-        if (st_load(OBJ_PROJECT0 + k, &dbx_pobj, sizeof dbx_pobj) == (int)sizeof dbx_pobj && dbx_pobj.magic == DBX_PAT_MAGIC)
+        if (st_load(OBJ_PROJECT0 + k, &dbx_pobj, sizeof dbx_pobj) == (int)sizeof dbx_pobj && dbx_pobj.magic == DBX_PAT_MAGIC) {
+            flags |= (dbx_pobj.pad & 15u) << (k * DBX_PAT_PER_OBJ);
             for (i = 0; i < DBX_PAT_PER_OBJ; i++) {
                 dbx_seq.pat[k * DBX_PAT_PER_OBJ + i] = dbx_pobj.p[i];
                 dbx_pat_sanitize(&dbx_seq.pat[k * DBX_PAT_PER_OBJ + i]);
             }
+        }
+    for (k = 0; k < DBX_NPAT / DBX_PAT_PER_OBJ; k++)                     /* the second sections, of the patterns that have one */
+        if ((flags >> (k * DBX_PAT_PER_OBJ)) & 15u && st_load(OBJ_SECB0 + k, &dbx_pobj, sizeof dbx_pobj) == (int)sizeof dbx_pobj &&
+            dbx_pobj.magic == DBX_PAT_MAGIC)
+            for (i = 0; i < DBX_PAT_PER_OBJ; i++)
+                if ((flags >> (k * DBX_PAT_PER_OBJ + i)) & 1u) {
+                    dbx_patb[k * DBX_PAT_PER_OBJ + i] = dbx_pobj.p[i];
+                    dbx_pat_sanitize(&dbx_patb[k * DBX_PAT_PER_OBJ + i]);
+                    dbx_seq.two |= (uint16_t)(1u << (k * DBX_PAT_PER_OBJ + i));
+                }
     if (st_load(OBJ_UPRESET0, &dbx_fobj, sizeof dbx_fobj) == (int)sizeof dbx_fobj &&
         (dbx_fobj.magic == DBX_FX_MAGIC || dbx_fobj.magic == DBX_FX_MAGIC_H || dbx_fobj.magic == DBX_FX_MAGIC_F || dbx_fobj.magic == DBX_FX_MAGIC_G)) {
         const uint8_t *to = dbx_fobj.magic == DBX_FX_MAGIC_F ? DBX_FX_F2NEW : dbx_fobj.magic == DBX_FX_MAGIC_G ? DBX_FX_G2NEW : 0;
@@ -126,6 +142,24 @@ static void dbx_store_load(void)
         if (old)
             dbx_store.pats |= 0x10u;                                           /* (written again in the new order) */
     }
+    if (dbx_seq.two && st_load(OBJ_SEC_FX, &dbx_fobj, sizeof dbx_fobj) == (int)sizeof dbx_fobj && dbx_fobj.magic == DBX_FX_MAGIC)
+        for (k = 0; k < DBX_NPAT; k++)                                    /* the second sections' effects' steps */
+            for (i = 0; i < DBX_NFX; i++) {
+                uint32_t s;
+                dbx_fxb[k].on[i] = dbx_fobj.pat[k].on[i];
+                for (s = 0; s < DBX_NSTEP; s++)
+                    dbx_fxb[k].mix[i][s] = dbx_fobj.pat[k].mix[i][s] > 100u ? 100 : dbx_fobj.pat[k].mix[i][s];
+            }
+    if (dbx_seq.two && st_load(OBJ_SEC_LK, &dbx_lkb, sizeof dbx_lkb) == (int)sizeof dbx_lkb && dbx_lkb.magic == DBX_L_MAGIC)
+        ;                                                                 /* (the steps' own values of the second sections: as they were) */
+    else if (dbx_seq.two)
+        for (i = 0; i < DBX_NPAT * 2u * 88u; i++)
+            ((uint8_t *)dbx_lkb.d)[i] = 0;
+    if (dbx_seq.two && st_load(OBJ_SEC_LK2, &dbx_lk2b, sizeof dbx_lk2b) == (int)sizeof dbx_lk2b && dbx_lk2b.magic == DBX_K_MAGIC)
+        ;
+    else if (dbx_seq.two)
+        for (i = 0; i < DBX_NPAT * 2u * 88u; i++)
+            ((uint8_t *)dbx_lk2b.d)[i] = 0;
     {                                                                    /* the steps' own DECAY and TONE (DBXL); or the extras of before (DBXX, its 8 bytes of ENV) */
         int rc = st_load(OBJ_DBX_X, &dbx_lk, sizeof dbx_lk);
         if (!(rc == (int)sizeof dbx_lk && dbx_lk.magic == DBX_L_MAGIC)) {
@@ -162,11 +196,10 @@ static void dbx_store_load(void)
             }
         }
         dbx_snap_song_load();
-        dbx_snap.live = 255;
-        dbx_snap_sync();                                                 /* (the sound of the pattern shown: the live one) */
+        dbx_snap_give(&dbx_snap.s[dbx_seq.pp]);                          /* (the sound: the project's; an older save had one a pattern: the one shown's) */
     }
     dbx_store.set = 0;
-    dbx_store.pats = (uint8_t)(dbx_store.pats & 0x50u);        /* (only the converted effects and sounds wait to be saved) */
+    dbx_store.pats = (uint16_t)(dbx_store.pats & 0x50u);        /* (only the converted effects and sounds wait to be saved) */
     dbx_store.t_ms = fm1_ms;
     dbx_store.saved_ms = fm1_ms - 5000u;                   /* (no "SAVED" at power-on) */
 }
@@ -208,21 +241,40 @@ static void dbx_store_poll(void)
             dbx_sobj.k[i].pad = i < 2u * LFO_NP ? (uint8_t)(dbx_lfo.p[i / LFO_NP][i % LFO_NP] + 1u) : 0u;
         }
         rc = st_save(OBJ_SETTINGS, &dbx_sobj, sizeof dbx_sobj);
-    } else if (dbx_store.pats & 0x40u) {                   /* the 16 patterns' sounds (the live one into its pattern's first) */
-        dbx_store.pats &= (uint8_t)~0x40u;
+    } else if (dbx_store.pats & 0x40u) {                   /* the sound (the live one, written as one a pattern) and the song */
+        dbx_store.pats &= (uint16_t)~0x40u;
         dbx_snap_flush();
         dbx_snap.magic = DBX_S_MAGIC;
         rc = st_save(OBJ_UPFM6, &dbx_snap, DBX_SNAP_BYTES);
+    } else if (dbx_store.pats & 0x4000u) {                 /* the second sections' own EXTRA and PAN */
+        dbx_store.pats &= (uint16_t)~0x4000u;
+        dbx_lk2b.magic = DBX_K_MAGIC;
+        rc = st_save(OBJ_SEC_LK2, &dbx_lk2b, sizeof dbx_lk2b);
+    } else if (dbx_store.pats & 0x2000u) {                 /* ... and their DECAY and TONE */
+        dbx_store.pats &= (uint16_t)~0x2000u;
+        dbx_lkb.magic = DBX_L_MAGIC;
+        rc = st_save(OBJ_SEC_LK, &dbx_lkb, sizeof dbx_lkb);
+    } else if (dbx_store.pats & 0x1000u) {                 /* ... and their effects' steps */
+        uint32_t e;
+        dbx_store.pats &= (uint16_t)~0x1000u;
+        dbx_fobj.magic = DBX_FX_MAGIC;
+        dbx_fobj.pad = 0;
+        for (e = 0; e < DBX_NFX; e++)
+            for (k = 0; k < DBX_NFXP; k++)
+                dbx_fobj.p[e][k] = dbx_fx.p[e][k];
+        for (k = 0; k < DBX_NPAT; k++)
+            dbx_fobj.pat[k] = dbx_fxb[k];
+        rc = st_save(OBJ_SEC_FX, &dbx_fobj, sizeof dbx_fobj);
     } else if (dbx_store.pats & 0x80u) {                   /* the steps' own EXTRA and PAN */
-        dbx_store.pats &= (uint8_t)~0x80u;
+        dbx_store.pats &= (uint16_t)~0x80u;
         dbx_lk2.magic = DBX_K_MAGIC;
         rc = st_save(OBJ_DBX_K, &dbx_lk2, sizeof dbx_lk2);
     } else if (dbx_store.pats & 0x20u) {                   /* the steps' own DECAY and TONE */
-        dbx_store.pats &= (uint8_t)~0x20u;
+        dbx_store.pats &= (uint16_t)~0x20u;
         dbx_lk.magic = DBX_L_MAGIC;
         rc = st_save(OBJ_DBX_X, &dbx_lk, sizeof dbx_lk);
     } else if (dbx_store.pats & 0x10u) {                   /* the effects: their parameters and every pattern's steps */
-        dbx_store.pats &= (uint8_t)~0x10u;
+        dbx_store.pats &= (uint16_t)~0x10u;
         dbx_fobj.magic = DBX_FX_MAGIC;
         dbx_fobj.pad = (uint32_t)dbx_mst.p[0] | ((uint32_t)(127 - dbx_mst.p[1]) << 8) | ((uint32_t)dbx_mst.p[2] << 16) |
                        ((uint32_t)dbx_mst.p[3] << 24);
@@ -235,12 +287,20 @@ static void dbx_store_poll(void)
     } else {
         for (k = 0; !((dbx_store.pats >> k) & 1u); k++)
             ;
-        dbx_store.pats &= (uint8_t)~(1u << k);
+        dbx_store.pats &= (uint16_t)~(1u << k);
         dbx_pobj.magic = DBX_PAT_MAGIC;
-        dbx_pobj.pad = 0;
-        for (i = 0; i < DBX_PAT_PER_OBJ; i++)
-            dbx_pobj.p[i] = dbx_seq.pat[k * DBX_PAT_PER_OBJ + i];
-        rc = st_save(OBJ_PROJECT0 + k, &dbx_pobj, sizeof dbx_pobj);
+        if (k >= 8u) {                                     /* a second sections' object: the flags are in the first one's */
+            k -= 8u;
+            dbx_pobj.pad = 0;
+            for (i = 0; i < DBX_PAT_PER_OBJ; i++)
+                dbx_pobj.p[i] = dbx_patb[k * DBX_PAT_PER_OBJ + i];
+            rc = st_save(OBJ_SECB0 + k, &dbx_pobj, sizeof dbx_pobj);
+        } else {
+            dbx_pobj.pad = (dbx_seq.two >> (k * DBX_PAT_PER_OBJ)) & 15u;
+            for (i = 0; i < DBX_PAT_PER_OBJ; i++)
+                dbx_pobj.p[i] = dbx_seq.pat[k * DBX_PAT_PER_OBJ + i];
+            rc = st_save(OBJ_PROJECT0 + k, &dbx_pobj, sizeof dbx_pobj);
+        }
     }
     if (rc == 0)
         dbx_store.saved_ms = fm1_ms;

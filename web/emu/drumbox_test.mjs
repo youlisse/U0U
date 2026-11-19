@@ -20,6 +20,7 @@ const WHITE_MASK = WHITE.reduce((m, k) => m | (1 << k), 0);
 let fails = 0;
 const check = (what, ok) => { console.log(`drumbox: ${what.padEnd(66)} ${ok ? "ok" : "FAIL"}`); if (!ok) fails++; };
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
+const np = (w, d) => { const pe = w.ex.web_pe(); w.btn(B.SAVE); w.key(WHITE[(pe + d + 16) % 16], 50); w.btn(B.HOME); };   // the pattern page: the next (or previous) pattern is picked (what OCT did, before it walked a pattern's sections)
 
 async function device(saved, splash) {                              // saved: the flash of another device (what a power cycle keeps)
   const { instance } = await WebAssembly.instantiate(bytes, {});
@@ -717,36 +718,34 @@ for (let i = 0; i < BLACK.length; i++) {
 {
   // the pattern page: EDIT held deletes the pattern shown, the next ones move down (3 patterns, the 2nd deleted: 1 stays, 3 becomes 2)
   const w = await device(); w.render(200);
-  const kit = (n) => { w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, n); w.render(100); w.btn(B.HOME); return w.ex.web_kit(); };
   w.key(BLACK[0], 30); w.setSteps([0]);                                                 // 1: a kick on step 1
-  w.btn(B.OCTUP); w.key(BLACK[0], 30); w.setSteps([4]); const k2 = kit(1);              // 2: step 5, its kit
-  w.btn(B.OCTUP); w.key(BLACK[0], 30); w.setSteps([8]); const k3 = kit(2);              // 3: step 9, its kit, an effect step
+  np(w, 1); w.key(BLACK[0], 30); w.setSteps([4]);                                      // 2: step 5
+  np(w, 1); w.key(BLACK[0], 30); w.setSteps([8]);                                      // 3: step 9, an effect step
   w.btn(B.FX); w.key(BLACK[7], 30); w.key(WHITE[6], 30); w.btn(B.HOME);
   w.btn(B.SAVE); w.btn(B.SAVE);                                                         // the song page: slots 1, 2, 3 are the patterns 1, 2, 3
   w.key(WHITE[0], 30); w.turn(EN.K1, 1); w.key(WHITE[1], 30); w.turn(EN.K1, 2); w.key(WHITE[2], 30); w.turn(EN.K1, 3);
-  w.btn(B.SAVE); w.btn(B.SAVE); w.btn(B.OCTDN); w.render(100);                          // (closed, then) the pattern page, on pattern 2
+  w.btn(B.SAVE); w.btn(B.SAVE); w.key(WHITE[1], 50); w.render(100);                    // (closed, then) the pattern page, on pattern 2
   const page = w.ex.web_page();
-  check(`3 patterns (kits ${k2} and ${k3}), the song 1 2 3, pattern 2 shown`, w.ex.web_pe() === 1 && k2 !== k3 && w.ex.web_pat_used(2) === 1 && [0, 1, 2].every((i) => w.ex.web_song(i, 0) === i) && w.ex.web_song(3, 0) === 255);
+  check("3 patterns, the song 1 2 3, pattern 2 shown", w.ex.web_pe() === 1 && w.ex.web_pat_used(2) === 1 && [0, 1, 2].every((i) => w.ex.web_song(i, 0) === i) && w.ex.web_song(3, 0) === 255);
   w.hold(B.EDIT, 800); w.render(100);
   check("EDIT held on the pattern page: 2 is gone, 3 is 2 (its steps, its effect step), 3 is empty", w.ex.web_step_on(0, 0, 0) === 1 && w.ex.web_step_on(1, 0, 8) === 1 && w.ex.web_step_on(1, 0, 4) === 0 && w.ex.web_fxstep(1, 7, 6) === 1 && w.ex.web_pat_used(2) === 0 && w.ex.web_fxstep(2, 7, 6) === 0);
   check("  the page stays, the number shown stays (2), the header says DELETED", w.ex.web_page() === page && w.ex.web_pe() === 1 && w.ex.web_erased() === 1);
   w.render(200);
-  check(`  the sound went with it: pattern 2 has the kit of the old 3 (${w.ex.web_kit()} of ${k3})`, w.ex.web_kit() === k3);
   check("  the song lost its slot of pattern 2, and 3 is now 2 (1 2 -)", w.ex.web_song(0, 0) === 0 && w.ex.web_song(1, 0) === 1 && w.ex.web_song(2, 0) === 255);
-  w.btn(B.OCTDN); w.render(200);
-  check(`  pattern 1 is as it was (its steps, its kit ${w.ex.web_kit()})`, w.ex.web_pe() === 0 && w.ex.web_step_on(0, 0, 0) === 1 && w.ex.web_kit() === 0);
+  w.key(WHITE[0], 50); w.render(200);
+  check("  pattern 1 is as it was (its steps)", w.ex.web_pe() === 0 && w.ex.web_step_on(0, 0, 0) === 1);
   w.render(2500);
   const r = await device(w.flash());
   check("  it is saved: after a restart the same", r.ex.web_step_on(1, 0, 8) === 1 && r.ex.web_step_on(1, 0, 4) === 0 && r.ex.web_pat_used(2) === 0 && r.ex.web_fxstep(1, 7, 6) === 1 && r.ex.web_song(1, 0) === 1 && r.ex.web_song(2, 0) === 255);
-  w.btn(B.OCTUP); w.btn(B.SAVE); w.btn(B.EDIT); w.render(60);
+  w.btn(B.EDIT); w.render(60);
   check("EDIT tapped (not held) on the page still opens the step page", w.ex.web_page() !== page);
 }
 {
   // deleting while it plays: what plays follows its pattern
   const w = await device(); w.render(200);
   w.key(BLACK[0], 30); w.setSteps([0]);
-  w.btn(B.OCTUP); w.key(BLACK[0], 30); w.setSteps([4]);
-  w.btn(B.OCTUP); w.key(BLACK[0], 30); w.setSteps([8]);                                 // pattern 3 plays
+  np(w, 1); w.key(BLACK[0], 30); w.setSteps([4]);
+  np(w, 1); w.key(BLACK[0], 30); w.setSteps([8]);                                       // pattern 3 plays
   w.btn(B.PLAY); w.render(300);
   w.btn(B.SAVE); w.key(WHITE[0], 50);                                                   // pattern 1 shown, 3 plays on
   check(`pattern 3 plays, 1 is shown (${w.ex.web_pp() + 1}, ${w.ex.web_pe() + 1})`, w.ex.web_pp() === 2 && w.ex.web_pe() === 0);
@@ -1341,7 +1340,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const t = await device(); t.render(200);
   check("a first start has the defaults: DELAY 1/8, CONTINUOUS off", t.ex.web_fxparam(FX.DELAY, 6) < 64 && t.ex.web_fxmaster() === 100);
   const oldsave = a.flash();                                // a save from before the effects: no effects object, no FX MIX
-  oldsave.fill(0xFF, 0xDC000, 0xDE000);
+  oldsave.fill(0xFF, 0xDC000, 0xDE000); oldsave.fill(0xFF, 0x9F000, 0xA0000); oldsave.fill(0xFF, 0xFE000, 0xFF000);      // (and no sound object either: it holds the effects' parameters too)
   const c = await device(oldsave); c.render(200);
   check("a flash without the effects' object boots with the effects at their defaults, the patterns intact", c.ex.web_fxparam(FX.DELAY, 6) < 64 && c.ex.web_pe() === a.ex.web_pe());
 }
@@ -1899,20 +1898,90 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   }
 }
 
-// ---- OCT- / OCT+: the previous, the next pattern; HOME held / EDIT held on SCL: the master page back to its state 0
+// ---- OCT- / OCT+ walk a pattern's two sections: the track doubled with OCT+ (asked, then confirmed), taken away with OCT- (asked, then confirmed)
 {
-  const w = await device();
-  const pe = () => w.ex.web_pe();
-  w.btn(B.OCTUP); const a = pe(); w.btn(B.OCTUP); const b = pe(); w.btn(B.OCTDN); w.btn(B.OCTDN); const c = pe(); w.btn(B.OCTDN); const d = pe(); w.btn(B.OCTUP); const e = pe();
-  check(`OCT+ is the next pattern, OCT- the previous, round (${a} ${b} ${c} ${d} ${e}: 1 2 0 15 0)`, a === 1 && b === 2 && c === 0 && d === 15 && e === 0);
-  check("  stopped: the pattern shown is the one that plays", w.ex.web_pp() === pe());
-  w.key(BLACK[0], 20); w.key(WHITE[0], 20);                    // a kick in pattern 1
-  w.btn(B.PLAY); w.render(300);
-  w.btn(B.OCTUP);
-  check(`  playing: the next one is shown and waits for the pass (shown ${pe()}, playing ${w.ex.web_pp()}, waiting ${w.ex.web_pq()})`, pe() === 1 && w.ex.web_pp() === 0 && w.ex.web_pq() === 1);
-  w.btn(B.OCTUP); w.btn(B.OCTDN); w.btn(B.OCTDN);
-  check(`  and going back to the one that plays takes the wait back (${w.ex.web_pq()})`, pe() === 0 && w.ex.web_pq() === 255);
+  const w = await device(); w.render(200);
+  const pe = () => w.ex.web_pe(), oct = (up) => { w.btn(up ? B.OCTUP : B.OCTDN); w.render(60); };
+  w.key(BLACK[0], 20); w.setSteps([0, 8]);                       // a kick on steps 1 and 9 of the first section
+  oct(false);
+  check(`OCT- with one section does nothing (asks nothing: ${w.ex.web_oct_ask()}, section ${w.ex.web_vs()}, pattern ${pe() + 1})`, w.ex.web_oct_ask() === 0 && w.ex.web_vs() === 0 && pe() === 0 && w.ex.web_two() === 0);
+  const plain = w.screen();
+  oct(true);
+  check(`OCT+ once asks to double the track (${w.ex.web_oct_ask()}), nothing is doubled yet (${w.ex.web_two()}), the screen says it`, w.ex.web_oct_ask() === 1 && w.ex.web_two() === 0 && w.screen().some((v, i) => v !== plain[i]));
+  oct(true);
+  check(`OCT+ again doubles it: the second section has the first one's steps (${w.ex.web_two()}, shown ${w.ex.web_vs() + 1} of 2, steps ${w.ex.web_step_on(16, 0, 0)}${w.ex.web_step_on(16, 0, 8)}${w.ex.web_step_on(16, 0, 4)})`, w.ex.web_two() === 1 && w.ex.web_vs() === 1 && w.ex.web_oct_ask() === 0 && w.ex.web_step_on(16, 0, 0) === 1 && w.ex.web_step_on(16, 0, 8) === 1 && w.ex.web_step_on(16, 0, 4) === 0);
+  check("  the pattern stays the same one (1), the grid shows the second section's steps", pe() === 0 && (w.ex.web_lit_keys() & WHITE_MASK) === ((1 << WHITE[0]) | (1 << WHITE[8])));
+  w.setSteps([4]);                                               // a step on the second section only
+  check("  a step set in the second section is not in the first", w.ex.web_step_on(16, 0, 4) === 1 && w.ex.web_step_on(0, 0, 4) === 0);
+  oct(false);
+  check(`OCT- goes back to the first section (${w.ex.web_vs()}), which is as it was (step 5 ${w.ex.web_step_on(0, 0, 4)})`, w.ex.web_vs() === 0 && w.ex.web_step_on(0, 0, 4) === 0 && w.ex.web_oct_ask() === 0);
+  oct(true);
+  check("OCT+ goes to the second section again (no question: it exists)", w.ex.web_vs() === 1 && w.ex.web_oct_ask() === 0);
+  oct(true);
+  check("  and OCT+ there does nothing: two sections at most", w.ex.web_vs() === 1 && w.ex.web_oct_ask() === 0 && w.ex.web_two() === 1);
+  oct(false); oct(false);
+  check(`OCT- in the first section asks to take the second away (${w.ex.web_oct_ask()}), it is still there (${w.ex.web_two()})`, w.ex.web_oct_ask() === 2 && w.ex.web_two() === 1 && w.ex.web_vs() === 0);
+  w.key(BLACK[1], 20);                                           // any other key: no
+  check("  another key drops the question, nothing is taken away", w.ex.web_oct_ask() === 0 && w.ex.web_two() === 1);
+  oct(false); oct(true);
+  check("  the other OCT drops it too", w.ex.web_oct_ask() === 0 && w.ex.web_two() === 1);
+  oct(false);
+  w.render(4500);
+  check("  and so does the time", w.ex.web_oct_ask() === 0 && w.ex.web_two() === 1);
+  oct(false); oct(false);
+  check(`a second OCT- takes it away (${w.ex.web_two()}), its steps with it (${w.ex.web_step_on(16, 0, 0)}), the first section is as it was (${w.ex.web_step_on(0, 0, 0)}${w.ex.web_step_on(0, 0, 8)})`, w.ex.web_two() === 0 && w.ex.web_vs() === 0 && w.ex.web_step_on(16, 0, 0) === 0 && w.ex.web_step_on(0, 0, 0) === 1 && w.ex.web_step_on(0, 0, 8) === 1);
+  oct(false);
+  check("  and OCT- does nothing again", w.ex.web_oct_ask() === 0);
+}
+// ---- a doubled track plays its first section, then its second, and goes round; the section shown is the one that is edited, whatever plays
+{
+  const w = await device(); w.render(200);
+  w.key(BLACK[0], 20); w.setSteps([0]);                            // a kick on step 1 of the first section
+  w.btn(B.OCTUP); w.render(60); w.btn(B.OCTUP); w.render(60);      // doubled: the second section is shown
+  w.key(BLACK[0], 20); w.setSteps([0]); w.setSteps([4]);           // in it: no kick on step 1 (taken off), a kick on step 5
+  check("the second section holds a kick on step 5 only", w.ex.web_step_on(16, 0, 0) === 0 && w.ex.web_step_on(16, 0, 4) === 1 && w.ex.web_step_on(0, 0, 0) === 1 && w.ex.web_step_on(0, 0, 4) === 0);
+  w.btn(B.OCTDN); w.render(60);                                    // the first section shown
+  w.btn(B.PLAY); w.render(100);
+  const seen = [];
+  for (let t = 0; t < 9000 && seen.length < 4; t += 2) { w.render(2); const c = w.ex.web_cs(); if (!seen.length || seen[seen.length - 1] !== c) seen.push(c); }
+  check(`it plays the first section, then the second, then the first (sections ${seen.join(" ")})`, seen.length >= 4 && seen.slice(0, 4).join("") === (seen[0] === 0 ? "0101" : "1010"));
+  check("  the section shown stays where it was while the other plays (shown 1)", w.ex.web_vs() === 0);
+  // the playhead is on the grid only while the section shown plays: step 1 (a kick on it) is lit, and dark under the playhead
+  let lit2 = 0, dark1 = 0, other2 = 0;
+  for (let t = 0; t < 5000; t += 20) {
+    w.render(20);
+    const led = w.led(WHITE[0]), cs = w.ex.web_cs(), cur = w.ex.web_step();
+    if (cs === 1) { lit2++; if (!led) other2++; }
+    else if (cur === 0 && !led) dark1++;
+  }
+  check(`  the first section is shown: while the second plays its playhead is not drawn (step 1 lit ${lit2 - other2} of ${lit2}), while the first plays it is (dark under it ${dark1} times)`, lit2 > 20 && other2 === 0 && dark1 > 3);
   w.btn(B.PLAY);
+  // saved
+  w.render(4000);
+  const r = await device(w.flash()); r.render(300);
+  check(`a doubled track is saved: after a restart it has its second section (${r.ex.web_two()}, step 5 ${r.ex.web_step_on(16, 0, 4)}, step 1 ${r.ex.web_step_on(16, 0, 0)})`, r.ex.web_two() === 1 && r.ex.web_step_on(16, 0, 4) === 1 && r.ex.web_step_on(16, 0, 0) === 0 && r.ex.web_step_on(0, 0, 0) === 1);
+}
+// ---- deleting a pattern takes its second section with it, and the ones after it keep theirs
+{
+  const w = await device(); w.render(200);
+  const dbl = () => { w.btn(B.OCTUP); w.render(60); w.btn(B.OCTUP); w.render(60); };
+  w.key(BLACK[0], 20); w.setSteps([0]); np(w, 1); w.key(BLACK[0], 20); w.setSteps([4]); dbl(); w.setSteps([8]);   // 2 is doubled, its second section has a step 9 more
+  np(w, 1); w.key(BLACK[0], 20); w.setSteps([12]);                                                             // 3 has step 13
+  check("pattern 2 is doubled (its second section: steps 5 and 9), 3 is not", w.ex.web_two() === 2 && w.ex.web_step_on(17, 0, 8) === 1 && w.ex.web_step_on(17, 0, 4) === 1 && w.ex.web_step_on(2, 0, 12) === 1);
+  np(w, -1); w.btn(B.SAVE); w.key(WHITE[1], 50); w.hold(B.EDIT, 800); w.render(100);
+  check(`pattern 2 deleted: 3 is 2 now, not doubled (${w.ex.web_two()}), its steps (${w.ex.web_step_on(1, 0, 12)}), nothing is left of the second section (${w.ex.web_step_on(17, 0, 8)})`, w.ex.web_two() === 0 && w.ex.web_step_on(1, 0, 12) === 1 && w.ex.web_step_on(1, 0, 4) === 0 && w.ex.web_step_on(17, 0, 8) === 0 && w.ex.web_step_on(17, 0, 4) === 0);
+}
+// ---- the mutation is each pattern's own
+{
+  const w = await device(); w.render(200);
+  w.btn(B.ARP); w.btn(B.ARP);                                      // ARP 2: MUTATE
+  w.turn(EN.K1, 6); w.render(60);
+  const a1 = w.ex.web_arp_lane(0, 0);
+  w.btn(B.HOME); np(w, 1); w.btn(B.ARP); w.btn(B.ARP);
+  const a2 = w.ex.web_arp_lane(0, 0);
+  w.btn(B.HOME); np(w, -1);
+  const a3 = w.ex.web_arp_lane(0, 0);
+  check(`pattern 1 mutates (AMOUNT ${a1}), pattern 2 does not (${a2}), and 1 still does (${a3})`, a1 === 30 && a2 === 0 && a3 === 30);
 }
 {
   const w = await device();
@@ -2297,77 +2366,68 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   check(`HOME held: both LFOs are off (${lfo(0)} | ${lfo(1)})`, lfo(0) === "5,0,0,0" && lfo(1) === "3,0,0,0");
 }
 
-// ---- the kit, the effects' parameters and the master page are each pattern's own (a pattern brings its sound in with it)
+// ---- the sound (the kit, the lanes' parameters, the effects' parameters, the master page, the LFOs, ENV) is the project's: no pattern has its own
 {
   const w = await device();
   const sound = () => [w.ex.web_kit(), w.ex.web_fxparam(FX.DELAY, 1), w.ex.web_fxparam(FX.REVERB, 7), w.ex.web_fxparam(FX.HALF, 6), w.ex.web_mst(0), w.ex.web_mst(1), w.ex.web_mst(3), w.ex.web_lane(0, 1), w.ex.web_lane(3, 4), w.ex.web_fxmaster(), w.ex.web_lfo(0, 1), w.ex.web_lfo(1, 1), w.ex.web_lfo(1, 2), w.ex.web_env(0), w.ex.web_env(5), w.ex.web_env(7)].join(",");
-  const go = (btn) => { w.btn(btn); w.render(40); };
   const waitStep = (n) => { for (let i = 0; i < 4000 && w.ex.web_step() !== n; i++) w.render(2); };
   const fresh = sound();
-  // pattern 1: kit MINI, a longer kick, the delay's feedback, the master's HPF and CLIP, the FX MIX
+  // pattern 1: kit MINI, a longer kick, the delay's feedback, the master's HPF and CLIP, the FX MIX, the LFOs, ENV
   w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 2); w.turn(EN.K2, -4); w.btn(B.HOME);
   w.key(BLACK[0], 20); w.turn(EN.K2, 10); w.key(BLACK[3], 20); w.turn(EN.K4, -6);
   w.fxSet(FX.DELAY, 1, 100); w.fxSet(FX.HALF, 6, "on"); w.btn(B.HOME);
   w.btn(B.SCL); w.turn(EN.K1, 10); w.turn(EN.K4, 8); w.btn(B.HOME);
-  w.btn(B.LFO); w.turn(EN.K2, 8); w.btn(B.LFO); w.turn(EN.K2, 6); w.turn(EN.K3, 3); w.btn(B.HOME);       // LFO 1 at 40 %, LFO 2 at 30 %, RAMP UP... (shape 3)
-  w.btn(B.ENV); w.turn(EN.K1, 6); w.btn(B.ENV); w.turn(EN.K2, 5); w.turn(EN.K4, -10); w.btn(B.HOME);       // ENV: the duck at 30 %, the attack, a gate
+  w.btn(B.LFO); w.turn(EN.K2, 8); w.btn(B.LFO); w.turn(EN.K2, 6); w.turn(EN.K3, 3); w.btn(B.HOME);
+  w.btn(B.ENV); w.turn(EN.K1, 6); w.btn(B.ENV); w.turn(EN.K2, 5); w.turn(EN.K4, -10); w.btn(B.HOME);
   w.key(BLACK[0], 20); w.key(WHITE[0], 10);                    // a kick on step 1
   const A = sound();
-  check(`a first start: ${fresh}; pattern 1 now has its own, with its LFOs and ENV (${A})`, A !== fresh && w.ex.web_kit() === 2);
-  go(B.OCTUP);
-  check(`pattern 2 has the sound a first start has (${sound()})`, sound() === fresh && w.ex.web_snap_live() === 1);
-  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 4); w.btn(B.HOME);
+  check(`a first start: ${fresh}; pattern 1 now has another sound (${A})`, A !== fresh && w.ex.web_kit() === 2);
+  np(w, 1);
+  check(`pattern 2 has the same sound: it is the project's (${sound()})`, sound() === A);
+  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 2); w.btn(B.HOME);
   w.key(BLACK[0], 20); w.turn(EN.K2, -8);
   w.fxSet(FX.DELAY, 1, 20); w.fxSet(FX.REVERB, 7, 100); w.btn(B.HOME);
   w.btn(B.SCL); w.turn(EN.K2, -10); w.btn(B.HOME);
   w.btn(B.LFO); w.turn(EN.K2, 3); w.btn(B.HOME);
   w.btn(B.ENV); w.turn(EN.K1, 12); w.btn(B.HOME);
   const B2 = sound();
-  check(`  and its own changes (${B2})`, B2 !== A && B2 !== fresh && w.ex.web_kit() === 4);
-  go(B.OCTDN);
-  check(`back on pattern 1: its sound (${sound()})`, sound() === A && w.ex.web_snap_live() === 0);
-  go(B.OCTUP);
-  check("  and pattern 2's again", sound() === B2);
-  // the pages show the sound of the pattern that is live
-  w.btn(B.GLO); w.btn(B.GLO); w.render(60);
-  const kitShown = w.screen(); go(B.OCTDN); w.render(100);
-  check("  a page open on the sound redraws when the pattern changes (the screen changes with the kit)", w.screen().some((v, i) => v !== kitShown[i]));
-  w.btn(B.HOME); go(B.OCTUP);
-  // copying: the sound goes with the pattern
+  check(`  a change made there is the project's (${B2})`, B2 !== A && B2 !== fresh && w.ex.web_kit() === 4);
+  np(w, -1);
+  check("back on pattern 1: the same sound, with that change", sound() === B2);
+  // copying a pattern copies its steps, not a sound; deleting one moves no sound
   w.btn(B.SAVE); w.ex.web_keys(1 << WHITE[0]); w.render(60); w.ex.web_keys((1 << WHITE[0]) | (1 << WHITE[4])); w.render(60); w.ex.web_keys(0); w.render(100); w.btn(B.SAVE); w.btn(B.SAVE);
-  check(`copying pattern 1 onto 5: the sound too (${w.ex.web_pe() + 1}: ${sound()})`, w.ex.web_pe() === 4 && sound() === A);
-  go(B.OCTDN); go(B.OCTDN); go(B.OCTDN); go(B.OCTDN);
-  check("  and pattern 1 is as it was", w.ex.web_pe() === 0 && sound() === A);
-  // while playing: the sound changes at the step where the new pattern begins
-  go(B.OCTUP); w.key(BLACK[0], 20); w.key(WHITE[0], 10); go(B.OCTDN);      // (a kick on step 1 of pattern 2 too, back on 1)
+  check(`copying pattern 1 onto 5: its steps (${w.ex.web_step_on(4, 0, 0)}), the sound as it is (${sound() === B2})`, w.ex.web_pe() === 4 && w.ex.web_step_on(4, 0, 0) === 1 && sound() === B2);
+  // while playing: the pattern that comes in changes the steps and nothing else
+  np(w, -4); np(w, 1); w.key(BLACK[0], 20); w.key(WHITE[0], 10); np(w, -1);
   w.btn(B.PLAY); waitStep(3);
-  go(B.OCTUP);
-  check(`playing pattern 1, 2 is picked: it waits, the sound is still 1's (live ${w.ex.web_snap_live()}, waiting ${w.ex.web_pq()}, ${sound() === A})`, w.ex.web_pq() === 1 && w.ex.web_snap_live() === 0 && sound() === A);
+  np(w, 1);
+  check(`playing pattern 1, 2 is picked: it waits (${w.ex.web_pq()}), the sound is as it was`, w.ex.web_pq() === 1 && sound() === B2);
   waitStep(15); w.render(5);
-  const before = sound();
   waitStep(0); w.render(5);
-  check(`  and 2's comes in when its first step does (the last step: 1's, the first: 2's)`, before === A && sound() === B2 && w.ex.web_snap_live() === 1);
+  check("  and it comes in with its first step, with the same sound", w.ex.web_pp() === 1 && sound() === B2);
   w.btn(B.PLAY);
-  // reset: the pattern shown only
+  // reset: the whole sound, whichever pattern is shown
   w.render(300);
   w.hold(B.HOME, 800);
-  check(`HOME held on pattern 2: its sound back to a first start's (${sound()})`, sound() === fresh);
-  go(B.OCTDN);
-  check("  pattern 1 keeps its own", sound() === A);
+  check(`HOME held: the project's sound is back to a first start's (${sound()})`, sound() === fresh);
+  np(w, -1);
+  check("  whichever pattern is shown", sound() === fresh);
   w.render(4000);
-  // saved
+  // saved: one sound
+  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 3); w.btn(B.HOME);
+  const C = sound(); w.render(4000);
   const r = await device(w.flash()); r.render(300);
   const rs = () => [r.ex.web_kit(), r.ex.web_fxparam(FX.DELAY, 1), r.ex.web_fxparam(FX.REVERB, 7), r.ex.web_fxparam(FX.HALF, 6), r.ex.web_mst(0), r.ex.web_mst(1), r.ex.web_mst(3), r.ex.web_lane(0, 1), r.ex.web_lane(3, 4), r.ex.web_fxmaster(), r.ex.web_lfo(0, 1), r.ex.web_lfo(1, 1), r.ex.web_lfo(1, 2), r.ex.web_env(0), r.ex.web_env(5), r.ex.web_env(7)].join(",");
-  check(`they are saved: the pattern shown comes back with its sound (${rs()})`, rs() === A);
-  r.btn(B.OCTUP); r.render(60);
-  check("  and the others", rs() === fresh);
-  // an older save: one sound for all the patterns, read as the same in each of the 16
+  check(`it is saved (${rs()})`, rs() === C);
+  np(r, 1); r.render(60);
+  check("  and it is the same under the other patterns", rs() === C);
+  // an older save: one sound a pattern; the one of the pattern shown is the project's
   const old = w.flash(); old.fill(0xFF, 0x9F000, 0xA0000); old.fill(0xFF, 0xFE000, 0xFF000);
   const o = await device(old); o.render(300);
   const os = () => [o.ex.web_kit(), o.ex.web_fxparam(FX.DELAY, 1), o.ex.web_mst(0), o.ex.web_lane(0, 1)].join(",");
-  const o1 = os(); o.btn(B.OCTUP); o.render(60); const o2 = os(); o.btn(B.OCTUP); o.btn(B.OCTUP); o.btn(B.OCTUP); o.render(60); const o5 = os();
-  check(`an older save (no sounds): the sound it had is each pattern's (${o1} | ${o2} | ${o5})`, o1 === o2 && o2 === o5 && o1.startsWith("2,"));
-  // the first sounds (184 bytes each, no LFOs, no ENV) are read too: the sounds as they were, the LFOs and ENV as they are in all
+  const o1 = os(); np(o, 1); o.render(60); const o2 = os();
+  check(`an older save (no sounds): the sound it had is the project's (${o1} | ${o2})`, o1 === o2);
+  // the first sounds (184 bytes each, no LFOs, no ENV) are read too: the sound of the pattern shown, as it was
   {
     const crcTable = new Uint32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
     const crc32 = (u8) => { let c = 0xFFFFFFFF; for (const b of u8) c = crcTable[(c ^ b) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
@@ -2386,8 +2446,8 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     hdr.setUint32(28, crc32(new Uint8Array(flash.buffer, 0x9F000, 28)), true);
     const m = await device(flash); m.render(300);
     const ms = () => [m.ex.web_kit(), m.ex.web_lane(0, 1), m.ex.web_lfo(0, 1), m.ex.web_lfo(1, 1), m.ex.web_env(0)].join(",");
-    const m1 = ms(); m.btn(B.OCTUP); m.render(60); const m2 = ms(); m.btn(B.OCTUP); m.btn(B.OCTUP); m.render(60); const m4 = ms();
-    check(`the first sounds are read (kit and lane DECAY of each pattern: ${m1} | ${m2} | ${m4}), the LFOs and ENV as they are in each`, m1 === "0,40,0,0,0" && m2 === "1,41,0,0,0" && m4 === "3,43,0,0,0");
+    const m1 = ms(); np(m, 1); m.render(60); const m2 = ms();
+    check(`the first sounds are read (the pattern shown's: ${m1}), and it is the same under another (${m2})`, m1 === "0,40,0,0,0" && m2 === m1);
   }
 }
 
@@ -2493,9 +2553,9 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   w.btn(B.GLO); w.btn(B.GLO);
   // the mutes follow the project, not the pattern, and are not kept at power-off; a reset puts them back
   chord(0, 60); chord(4, 60);
-  w.btn(B.OCTUP); w.render(100);
+  np(w, 1); w.render(100);
   check(`a pattern change does not change them (${mutes()})`, mutes() === "10001000000");
-  w.btn(B.OCTDN); w.render(3000);
+  np(w, -1); w.render(3000);
   const r = await device(w.flash()); r.render(300);
   check("  they are not saved: the next start has every lane sounding", [...Array(11).keys()].every((l) => r.ex.web_lane(l, 5) === 0));
   w.hold(B.HOME, 800);
@@ -2544,8 +2604,8 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   {
     const w = await device();
     w.key(BLACK[0], 20); w.turn(EN.ALGO, -12);
-    w.btn(B.OCTUP); w.render(100);
-    check(`PAN is part of the pattern's sound (pattern 2: ${w.ex.web_lane(0, 7)}, back on 1: ${(w.btn(B.OCTDN), w.render(100), w.ex.web_lane(0, 7))})`, w.ex.web_lane(0, 7) === -12);
+    np(w, 1); w.render(100);
+    check(`PAN is part of the pattern's sound (pattern 2: ${w.ex.web_lane(0, 7)}, back on 1: ${(np(w, -1), w.render(100), w.ex.web_lane(0, 7))})`, w.ex.web_lane(0, 7) === -12);
     w.hold(B.HOME, 800);
     check(`  a reset puts it back (${w.ex.web_lane(0, 7)})`, w.ex.web_lane(0, 7) === 0);
   }
@@ -2670,10 +2730,10 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   w.btn(B.HOME);
   w.btn(B.SAVE); w.ex.web_keys(1 << WHITE[0]); w.render(60); w.ex.web_keys((1 << WHITE[0]) | (1 << WHITE[3])); w.render(60); w.ex.web_keys(0); w.render(100); w.btn(B.SAVE); w.btn(B.SAVE);
   check(`a copied pattern takes the steps' DECAY and TONE (${w.ex.web_lock(0, 4, 8)}, ${w.ex.web_lock(1, 4, 8)}: 24, 16)`, w.ex.web_pe() === 3 && w.ex.web_lock(0, 4, 8) === 24 && w.ex.web_lock(1, 4, 8) === 16);
-  w.btn(B.OCTDN); w.btn(B.OCTDN); w.btn(B.OCTDN); w.render(3500);
+  np(w, -1); np(w, -1); np(w, -1); w.render(3500);
   const r = await device(w.flash()); r.render(300);
   check(`they are saved (${r.ex.web_lock(0, 4, 8)}, ${r.ex.web_lock(1, 4, 8)})`, r.ex.web_lock(0, 4, 8) === 24 && r.ex.web_lock(1, 4, 8) === 16);
-  r.btn(B.OCTUP); r.btn(B.OCTUP); r.btn(B.OCTUP); r.render(100);
+  np(r, 1); np(r, 1); np(r, 1); r.render(100);
   check("  and the copy's", r.ex.web_lock(0, 4, 8) === 24 && r.ex.web_lock(1, 4, 8) === 16);
   // a mutation moves the hit with them
   const m = await device();
@@ -2693,7 +2753,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     for (let i = 0; i < 12000 && o.length < n; i++) { w.render(4); const p = w.ex.web_pass(); if (p !== last) { last = p; w.render(8); o.push(w.ex.web_pp()); } }
     return o;
   };
-  for (let k = 0; k < 3; k++) { if (k) w.btn(B.OCTUP); w.key(BLACK[0], 20); w.key(WHITE[0], 10); }   // a kick in patterns 1, 2 and 3
+  for (let k = 0; k < 3; k++) { if (k) np(w, 1); w.key(BLACK[0], 20); w.key(WHITE[0], 10); }   // a kick in patterns 1, 2 and 3
   w.btn(B.SAVE); w.btn(B.SAVE);
   check(`SAVE tapped twice: the song page (${w.ex.web_page()}), a first start has no song (${[0, 1, 2].map((s) => w.ex.web_song(s, 0)).join(",")}, off ${w.ex.web_song_on()})`, w.ex.web_page() === 16 && w.ex.web_song(0, 0) === 255 && w.ex.web_song_on() === 0);
   w.key(WHITE[0], 40); w.turn(EN.K1, 1); w.turn(EN.K2, 1);        // slot 1: pattern 1, twice
@@ -2704,14 +2764,14 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
         [0, 1, 2, 255].every((v, s) => w.ex.web_song(s, 0) === v) && w.ex.web_song(0, 1) === 1 && w.ex.web_song(1, 1) === 0 && w.ex.web_song_on() === 1);
   check("  the slot picked has its key lit, the others of the chain the mid level", w.led(WHITE[2]) === 1 && w.led(WHITE[0]) === 0 && ((w.ex.web_mid_keys() >>> WHITE[0]) & 1) === 1);
   w.btn(B.SAVE);
-  w.btn(B.OCTUP); w.btn(B.OCTUP);                                 // (pattern 3 shown: PLAY starts from the song's first slot all the same)
+  np(w, 1); np(w, 1);                                 // (pattern 3 shown: PLAY starts from the song's first slot all the same)
   const base = w.ex.web_pass(), shown = w.ex.web_pe();
   w.btn(B.PLAY);
   const seq = passes(9, base);
   check(`PLAY: the song from its first slot, round and round (${seq.map((p) => p + 1).join(" ")}: 1 1 2 3 1 1 2 3 1)`, seq.join() === "0,0,1,2,0,0,1,2,0");
   check(`  the pattern shown stays the one picked (${w.ex.web_pe() + 1}: ${shown + 1}) while the song plays others (${w.ex.web_pp() + 1})`, w.ex.web_pe() === shown);
   // a pattern picked while the song plays is only the one shown and edited: the song goes on as planned
-  w.btn(B.OCTUP); w.btn(B.OCTUP);
+  np(w, 1); np(w, 1);
   const picked = w.ex.web_pe(), after = passes(3), plan = [0, 0, 1, 2];
   check(`a pattern picked while it plays (${picked + 1}) is shown, not played (next ${w.ex.web_pq() === 255 ? "none" : w.ex.web_pq() + 1}; the passes ${after.map((p) => p + 1).join(" ")} follow the song)`,
         w.ex.web_pe() === picked && w.ex.web_pq() === 255 && after.length === 3 && [0, 1, 2, 3].some((o) => after.every((p, k) => p === plan[(o + k) % 4])));
@@ -2721,7 +2781,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   w.btn(B.PLAY); w.render(300);
   // off: the pattern alone
   w.btn(B.SAVE); w.btn(B.SAVE); w.turn(EN.K4, -1); w.btn(B.HOME);
-  w.btn(B.OCTDN); w.render(60);
+  np(w, -1); w.render(60);
   w.btn(B.PLAY);
   const alone = passes(3);
   check(`SONG off: the pattern shown loops (${alone.map((p) => p + 1).join(" ")})`, alone.every((p) => p === alone[0]));

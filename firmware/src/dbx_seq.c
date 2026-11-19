@@ -20,9 +20,8 @@
 #define DBX_NUDGE_MAX 24                   /* a notch is 1/48 of a step: 24 = half a step */
 #define DBX_RATCHET_MAX 8u
 #define DBX_PITCH_MAX 12
-static void dbx_snap_sync(void);           /* (dbx_snap.c: the sound of the pattern that plays) */
-static void dbx_snap_copy(uint32_t src, uint32_t dst);
-static void dbx_snap_remove(uint32_t p);
+static void dbx_arp_copy(uint32_t src, uint32_t dst);      /* (dbx_arp.c: a pattern's mutation settings, copied or shifted with it) */
+static void dbx_arp_shift(uint32_t p);
 static void dbx_lfo_sync(uint32_t pos);    /* (... and at every step, their cycles are set to where the steps are) */
 static void dbx_lfo_restart(void);         /* (dbx_lfo.c: the sequencer started, the LFOs start their cycles) */
 #define DBX_NPEND 64u
@@ -31,6 +30,7 @@ static const uint8_t DBX_DIV[3] = {8, 16, 32};     /* the subdivisions, slowest 
 typedef struct { int32_t t_q8; uint8_t lane, vel, used; int8_t semi; dbx_hk_t k; } dbx_pend_t;     /* a hit waiting to play */
 
 #define DBX_NPAT 16u
+#define DBX_NVP 32u                        /* the data of the patterns: a pattern's first section (0..15) and its second (16..31) */
 #define DBX_NFX 11u                        /* the step effects: one per black key (dbx_fx.c) */
 typedef struct {                           /* a pattern's effect steps: 198 bytes (all 16 are one flash object, dbx_store.c) */
     uint16_t on[DBX_NFX];                  /* bit s: the effect is on at step s */
@@ -49,6 +49,9 @@ static struct {
     dbx_pat_t pat[DBX_NPAT];
     dbx_fxpat_t fx[DBX_NPAT];              /* and its effects' steps */
     uint8_t pe;                            /* the pattern the UI shows and edits */
+    uint8_t vs;                            /* ... and its section (0, 1): OCT-, OCT+; what plays does not follow it */
+    uint16_t two;                          /* bit p: the pattern has a second section (the data of p + 16): it plays after the first */
+    volatile uint8_t ps, cs;               /* the section that comes next, the one playing (ISR) */
     volatile uint8_t pp;                   /* the pattern that plays */
     volatile uint8_t pq;                   /* the one that plays from the next pass (255: none) */
     uint16_t bpm;                          /* the tempo: ours, or measured from the computer's clock */
@@ -83,7 +86,17 @@ static struct {
     volatile uint16_t lv_req;              /* UI -> ISR: play these lanes now (bit i), as REC does for the black keys */
     dbx_pend_t pend[DBX_NPEND];
 } dbx_seq;
-#define DBX_E (dbx_seq.pat[dbx_seq.pe])    /* the pattern the UI works on */
+/* the second sections: 14 KB of patterns and 3 KB of effects' steps that RAM has no room for (the pool is zeroed at boot: dbx_seq_init fills them) */
+static dbx_pat_t dbx_patb[DBX_NPAT] __attribute__((section(".pool")));
+static dbx_fxpat_t dbx_fxb[DBX_NPAT] __attribute__((section(".pool")));
+#define DBX_PATV(v) ((v) < DBX_NPAT ? &dbx_seq.pat[(v)] : &dbx_patb[(v) - DBX_NPAT])
+#define DBX_FXV(v) ((v) < DBX_NPAT ? &dbx_seq.fx[(v)] : &dbx_fxb[(v) - DBX_NPAT])
+#define DBX_EV ((uint32_t)dbx_seq.pe + DBX_NPAT * (uint32_t)dbx_seq.vs)    /* the data the UI works on: the pattern shown, its section shown */
+#define DBX_E (*DBX_PATV(DBX_EV))
+static uint32_t dbx_pat_idx(const dbx_pat_t *p)
+{
+    return p >= dbx_patb && p < dbx_patb + DBX_NPAT ? DBX_NPAT + (uint32_t)(p - dbx_patb) : (uint32_t)(p - dbx_seq.pat);
+}
 
 /* a step's own DECAY and TONE (EDIT 2), each a signed nibble (-8..7, a unit is 8 of the lane's own 0..127) per lane and step, 88 bytes a parameter a pattern;
  * 16 patterns are 2816 bytes, one flash object (DBXL) */
@@ -99,12 +112,18 @@ static uint32_t dbx_song_len(void)
 }
 static uint32_t dbx_song_active(void) { return dbx_song.on && dbx_song_len(); }    /* the song plays what it plans: no pattern is picked to play */
 #define DBX_L_MAGIC 0x4C584244u                /* "DBXL" */
-static struct { uint32_t magic; uint8_t d[DBX_NPAT][2][88]; } dbx_lk;
+typedef struct { uint32_t magic; uint8_t d[DBX_NPAT][2][88]; } dbx_lkt_t;
+static dbx_lkt_t dbx_lk;
+static dbx_lkt_t dbx_lkb __attribute__((section(".pool"))), dbx_lk2b __attribute__((section(".pool")));       /* (the second sections') */
 /* ... and its own EXTRA and PAN (DBXK, the same way: 2816 bytes, one more flash object, OBJ_AUTOSAVE's pair, free in this firmware); a unit is 8, 8, 8 and 4 */
 #define DBX_K_MAGIC 0x4B584244u                /* "DBXK" */
-static struct { uint32_t magic; uint8_t d[DBX_NPAT][2][88]; } dbx_lk2;
+static dbx_lkt_t dbx_lk2;
 static const uint8_t DBX_LK_UNIT[4] = {8, 8, 8, 4};      /* the unit of which: 0 DECAY, 1 TONE, 2 EXTRA, 3 PAN */
-static uint8_t *dbx_lk_cell(uint32_t pat, uint32_t which, uint32_t n) { return which < 2u ? &dbx_lk.d[pat][which][n >> 1] : &dbx_lk2.d[pat][which - 2u][n >> 1]; }
+static uint8_t *dbx_lk_cell(uint32_t v, uint32_t which, uint32_t n)       /* v: the data (pattern, or pattern + 16 for its second section) */
+{
+    dbx_lkt_t *t = v < DBX_NPAT ? (which < 2u ? &dbx_lk : &dbx_lk2) : (which < 2u ? &dbx_lkb : &dbx_lk2b);
+    return &t->d[v & (DBX_NPAT - 1u)][which & 1u][n >> 1];
+}
 static int32_t dbx_lk_get(uint32_t pat, uint32_t which, uint32_t lane_i, uint32_t step)
 {
     uint32_t n = lane_i * DBX_NSTEP + step;
@@ -124,15 +143,23 @@ static void dbx_lk_set(uint32_t pat, uint32_t which, uint32_t lane_i, uint32_t s
  * moment after the last change, never while playing */
 static struct {
     uint32_t t_ms, saved_ms;               /* the last change; the last save */
-    uint8_t set, pats;
+    uint16_t pats;                         /* bits 0..3 the four pattern objects, 0x10 the effects, 0x20 and 0x80 the steps' own values, 0x40 the sound and the song;
+                                            * 0x100..0x800 the four objects of the second sections, 0x1000, 0x2000, 0x4000 their effects and own values */
+    uint8_t set;
     uint8_t now;                           /* SAVE held: write what waits at once, playing or not */
 } dbx_store;
+#define DBX_SEC_BITS 0x7F00u
 static void dbx_touch_set(void) { dbx_store.set = 1; dbx_store.pats |= 0x40u; dbx_store.t_ms = fm1_ms; }
-static void dbx_touch_x(void) { dbx_store.pats |= 0x40u; dbx_store.t_ms = fm1_ms; }          /* (ENV: it is in the patterns' sounds) */
-static void dbx_touch_lk(void) { dbx_store.pats |= 0x20u; dbx_store.t_ms = fm1_ms; }         /* (the steps' own DECAY and TONE: their object) */
-static void dbx_touch_lk2(void) { dbx_store.pats |= 0x80u; dbx_store.t_ms = fm1_ms; }        /* (the steps' own EXTRA and PAN: theirs) */
-static void dbx_touch_fx(void) { dbx_store.pats |= 0x50u; dbx_store.t_ms = fm1_ms; }       /* (0x10 the effects' object, 0x40 the patterns' sounds) */
-static void dbx_touch_pat(uint32_t p) { dbx_store.pats |= (uint8_t)(1u << (p / 4u)); dbx_store.t_ms = fm1_ms; }
+static void dbx_touch_x(void) { dbx_store.pats |= 0x40u; dbx_store.t_ms = fm1_ms; }          /* (ENV: it is in the sound) */
+static void dbx_touch_lk(void) { dbx_store.pats |= dbx_seq.vs ? 0x2000u : 0x20u; dbx_store.t_ms = fm1_ms; }     /* (the steps' own DECAY and TONE: their object, of the section shown) */
+static void dbx_touch_lk2(void) { dbx_store.pats |= dbx_seq.vs ? 0x4000u : 0x80u; dbx_store.t_ms = fm1_ms; }   /* (the steps' own EXTRA and PAN: theirs) */
+static void dbx_touch_fx(void) { dbx_store.pats |= 0x50u | (dbx_seq.vs ? 0x1000u : 0u); dbx_store.t_ms = fm1_ms; }   /* (0x10 the effects' object: parameters and the first sections' steps, 0x40 the sound) */
+static void dbx_touch_pat(uint32_t v) { dbx_store.pats |= (uint16_t)(v < DBX_NPAT ? 1u << (v / 4u) : 0x100u << ((v - DBX_NPAT) / 4u)); dbx_store.t_ms = fm1_ms; }
+static void dbx_touch_all_sec(void)        /* a second section made, removed or moved: everything it is kept in, and the flags of the first objects */
+{
+    dbx_store.pats |= (uint16_t)(DBX_SEC_BITS | 0x0Fu | 0x10u | 0x20u | 0x80u);
+    dbx_store.t_ms = fm1_ms;
+}
 
 /* a step as it is placed */
 static void dbx_step_defaults(dbx_pat_t *p, uint32_t i, uint32_t s)
@@ -142,10 +169,10 @@ static void dbx_step_defaults(dbx_pat_t *p, uint32_t i, uint32_t s)
     p->ratchet[i][s] = 1;
     p->chance[i][s] = 100;
     p->semi[i][s] = 0;
-    dbx_lk_set((uint32_t)(p - dbx_seq.pat), 0, i, s, 0);
-    dbx_lk_set((uint32_t)(p - dbx_seq.pat), 1, i, s, 0);
-    dbx_lk_set((uint32_t)(p - dbx_seq.pat), 2, i, s, 0);
-    dbx_lk_set((uint32_t)(p - dbx_seq.pat), 3, i, s, 0);
+    dbx_lk_set(dbx_pat_idx(p), 0, i, s, 0);
+    dbx_lk_set(dbx_pat_idx(p), 1, i, s, 0);
+    dbx_lk_set(dbx_pat_idx(p), 2, i, s, 0);
+    dbx_lk_set(dbx_pat_idx(p), 3, i, s, 0);
 }
 
 /* a step length in samples (Q8) from the tempo: FS * 60 * 4 / (BPM * DIV) (FS * 60 * 256 * 4 fits 32 bits) */
@@ -159,14 +186,14 @@ static void dbx_pat_empty(uint32_t p)
 {
     uint32_t i, k;
     for (i = 0; i < DBX_NFX; i++) {
-        dbx_seq.fx[p].on[i] = 0;
+        DBX_FXV(p)->on[i] = 0;
         for (k = 0; k < DBX_NSTEP; k++)
-            dbx_seq.fx[p].mix[i][k] = 100;
+            DBX_FXV(p)->mix[i][k] = 100;
     }
     for (i = 0; i < DBX_NLANE; i++) {
-        dbx_seq.pat[p].steps[i] = 0;     /* empty patterns: the user's to make */
+        DBX_PATV(p)->steps[i] = 0;       /* empty patterns: the user's to make */
         for (k = 0; k < DBX_NSTEP; k++)
-            dbx_step_defaults(&dbx_seq.pat[p], i, k);
+            dbx_step_defaults(DBX_PATV(p), i, k);
     }
 }
 
@@ -182,62 +209,103 @@ static void dbx_seq_init(void)
     dbx_seq.rep_r = 1;
     dbx_seq.rnd = 0x2545F491u;
     dbx_seq_tempo();
-    for (p = 0; p < DBX_NPAT; p++)
+    dbx_seq.two = 0;
+    dbx_seq.vs = dbx_seq.ps = dbx_seq.cs = 0;
+    for (p = 0; p < DBX_NVP; p++)
         dbx_pat_empty(p);
 }
 
-static uint32_t dbx_pat_used(uint32_t p)    /* the pattern has a step */
+static uint32_t dbx_data_used(uint32_t v)   /* the data (a section) has a step */
 {
     uint32_t i, any = 0;
     for (i = 0; i < DBX_NLANE; i++)
-        any |= dbx_seq.pat[p].steps[i];
+        any |= DBX_PATV(v)->steps[i];
     for (i = 0; i < DBX_NFX; i++)
-        any |= dbx_seq.fx[p].on[i];
+        any |= DBX_FXV(v)->on[i];
     return any != 0u;
 }
+static uint32_t dbx_pat_used(uint32_t p)    /* the pattern has a step, in either section */
+{
+    return dbx_data_used(p) || (((dbx_seq.two >> p) & 1u) && dbx_data_used(p + DBX_NPAT));
+}
 
-/* the pattern to show and edit; it plays at once when stopped, and from the next pass when playing (picking the one
+/* the pattern to show and edit (its first section); it plays at once when stopped, and from the next pass when playing (picking the one
  * that plays again takes the wait back). With the song on (and a slot in it) the song plays what it plans, and what is picked is only the one
- * shown and edited (stopped, its sound is the live one, as ever, until PLAY starts the song) */
+ * shown and edited. The sound is the same for all of them: only the steps (and the mutation) are a pattern's. */
 static void dbx_pat_select(uint32_t p)
 {
     if (p >= DBX_NPAT)
         return;
     dbx_seq.pe = (uint8_t)p;
+    dbx_seq.vs = 0;
     if (dbx_seq.playing && dbx_song_active())
         ;
     else if (dbx_seq.playing)
         dbx_seq.pq = p == dbx_seq.pp ? 255u : (uint8_t)p;
     else {
         dbx_seq.pp = (uint8_t)p;
+        dbx_seq.ps = 0;
         dbx_seq.pq = 255;
     }
     dbx_touch_set();
 }
 
-static void dbx_pat_copy(uint32_t src, uint32_t dst)
+static void dbx_data_copy(uint32_t src, uint32_t dst)     /* a section's data copied: its steps, its effects' steps, its own values */
+{
+    uint32_t w, b;
+    *DBX_PATV(dst) = *DBX_PATV(src);
+    *DBX_FXV(dst) = *DBX_FXV(src);
+    for (w = 0; w < 2u; w++)
+        for (b = 0; b < 88u; b++) {
+            dbx_lkt_t *l0 = src < DBX_NPAT ? &dbx_lk : &dbx_lkb, *l1 = dst < DBX_NPAT ? &dbx_lk : &dbx_lkb;
+            dbx_lkt_t *k0 = src < DBX_NPAT ? &dbx_lk2 : &dbx_lk2b, *k1 = dst < DBX_NPAT ? &dbx_lk2 : &dbx_lk2b;
+            l1->d[dst & (DBX_NPAT - 1u)][w][b] = l0->d[src & (DBX_NPAT - 1u)][w][b];
+            k1->d[dst & (DBX_NPAT - 1u)][w][b] = k0->d[src & (DBX_NPAT - 1u)][w][b];
+        }
+}
+
+static void dbx_pat_copy(uint32_t src, uint32_t dst)      /* a pattern copied with its second section, if it has one */
 {
     if (src >= DBX_NPAT || dst >= DBX_NPAT || src == dst)
         return;
-    dbx_seq.pat[dst] = dbx_seq.pat[src];
-    dbx_seq.fx[dst] = dbx_seq.fx[src];
-    for (uint32_t w = 0; w < 2u; w++)
-        for (uint32_t b = 0; b < 88u; b++)
-            dbx_lk.d[dst][w][b] = dbx_lk.d[src][w][b];
-    for (uint32_t w = 0; w < 2u; w++)
-        for (uint32_t b = 0; b < 88u; b++)
-            dbx_lk2.d[dst][w][b] = dbx_lk2.d[src][w][b];
-    dbx_touch_lk();
-    dbx_touch_lk2();
-    dbx_snap_copy(src, dst);
+    dbx_data_copy(src, dst);
+    if ((dbx_seq.two >> src) & 1u) {
+        dbx_data_copy(src + DBX_NPAT, dst + DBX_NPAT);
+        dbx_seq.two |= (uint16_t)(1u << dst);
+    } else
+        dbx_seq.two &= (uint16_t)~(1u << dst);
+    dbx_arp_copy(src, dst);
+    dbx_touch_all_sec();
     dbx_touch_pat(dst);
     dbx_touch_fx();
 }
 
 static void dbx_seq_flush(uint32_t mask);
 
-/* a pattern deleted: the ones after it move down by one and the 16th is a new one; the song loses its slots of it and its numbers follow;
- * the one shown stays at its number (it now shows the next). What plays follows its pattern (the one deleted: the next, as its place is taken) */
+/* a pattern's second section made: the first one's steps, copied (OCT+, twice) */
+static void dbx_sec_double(uint32_t p)
+{
+    if (p >= DBX_NPAT || ((dbx_seq.two >> p) & 1u))
+        return;
+    dbx_data_copy(p, p + DBX_NPAT);
+    dbx_seq.two |= (uint16_t)(1u << p);
+    dbx_touch_all_sec();
+}
+
+/* ... and taken away again (OCT-, twice, from the first section): the second one's data is a new pattern's again */
+static void dbx_sec_remove(uint32_t p)
+{
+    if (p >= DBX_NPAT || !((dbx_seq.two >> p) & 1u))
+        return;
+    dbx_seq.two &= (uint16_t)~(1u << p);
+    dbx_pat_empty(p + DBX_NPAT);
+    if (p == dbx_seq.pp)
+        dbx_seq_flush(0xFFFFu);                          /* (what was queued of it does not play) */
+    dbx_touch_all_sec();
+}
+
+/* a pattern deleted (with its second section): the ones after it move down by one and the 16th is a new one; the song loses its slots of it and its
+ * numbers follow; the one shown stays at its number (it now shows the next). What plays follows its pattern (the one deleted: the next, as its place is taken) */
 static void dbx_pat_delete(uint32_t p)
 {
     uint32_t q, w, b;
@@ -247,6 +315,8 @@ static void dbx_pat_delete(uint32_t p)
         dbx_seq_flush(0xFFFFu);                          /* (what was queued of it does not play) */
     if (dbx_seq.pp > p && dbx_seq.pp < DBX_NPAT)
         dbx_seq.pp--;
+    else if (dbx_seq.pp == p)
+        dbx_seq.ps = 0;
     if (dbx_seq.pq > p && dbx_seq.pq < DBX_NPAT)
         dbx_seq.pq--;
     if (dbx_seq.pq == dbx_seq.pp)
@@ -254,13 +324,24 @@ static void dbx_pat_delete(uint32_t p)
     for (q = p; q + 1u < DBX_NPAT; q++) {
         dbx_seq.pat[q] = dbx_seq.pat[q + 1u];
         dbx_seq.fx[q] = dbx_seq.fx[q + 1u];
+        dbx_patb[q] = dbx_patb[q + 1u];
+        dbx_fxb[q] = dbx_fxb[q + 1u];
         for (w = 0; w < 2u; w++)
             for (b = 0; b < 88u; b++) {
                 dbx_lk.d[q][w][b] = dbx_lk.d[q + 1u][w][b];
                 dbx_lk2.d[q][w][b] = dbx_lk2.d[q + 1u][w][b];
+                dbx_lkb.d[q][w][b] = dbx_lkb.d[q + 1u][w][b];
+                dbx_lk2b.d[q][w][b] = dbx_lk2b.d[q + 1u][w][b];
             }
     }
+    {   /* the second sections' flags move down too, the last one has none */
+        uint32_t lo = dbx_seq.two & ((1u << p) - 1u), hi = (dbx_seq.two >> (p + 1u)) << p;
+        dbx_seq.two = (uint16_t)(lo | hi);
+    }
     dbx_pat_empty(DBX_NPAT - 1u);
+    dbx_pat_empty(2u * DBX_NPAT - 1u);
+    dbx_arp_shift(p);
+    dbx_seq.vs = 0;
     for (q = w = 0; q < DBX_NPAT; q++) {                 /* the song: its slots of this pattern go, the later patterns' numbers go down */
         uint8_t sp = dbx_song.pat[q];
         if (sp == p)
@@ -274,12 +355,11 @@ static void dbx_pat_delete(uint32_t p)
         dbx_song.pat[w] = 255;
         dbx_song.rep[w] = dbx_song.again[w] = 0;
     }
-    dbx_snap_remove(p);
     for (q = p; q < DBX_NPAT; q++)
         dbx_touch_pat(q);
-    dbx_touch_lk();
-    dbx_touch_lk2();
+    dbx_touch_all_sec();
     dbx_touch_fx();
+    dbx_touch_set();                                     /* (the song is saved with the sound) */
 }
 
 static void dbx_seq_play(uint32_t on)
@@ -319,7 +399,7 @@ static void dbx_seq_set_ext(uint32_t on)
 /* UI side: play a step now (its velocity, ratchet and pitch; no nudge, no chance), and drop what a lane had queued */
 static void dbx_preview(uint32_t lane_i, uint32_t step)
 {
-    dbx_seq.pv_pat = dbx_seq.pe;
+    dbx_seq.pv_pat = (uint8_t)DBX_EV;
     dbx_seq.pv_lane = (uint8_t)lane_i;
     dbx_seq.pv_step = (uint8_t)step;
     dbx_seq.pv_req = 1;
@@ -499,7 +579,7 @@ static void dbx_sched(const dbx_pat_t *p, uint32_t i, uint32_t s, int32_t base_q
 {
     int32_t len = (int32_t)dbx_seq.step_q8, n = p->ratchet[i][s], gap, k;
     int32_t at = base_q8 + (use_nudge ? (int32_t)p->nudge[i][s] * (len / 48) : 0);
-    uint32_t pat = (uint32_t)(p - dbx_seq.pat);
+    uint32_t pat = dbx_pat_idx(p);
     dbx_hk_t hk = {(int8_t)(dbx_lk_get(pat, 0, i, s) * DBX_LK_UNIT[0]), (int8_t)(dbx_lk_get(pat, 1, i, s) * DBX_LK_UNIT[1]),      /* (the step's own DECAY, TONE, EXTRA */
                    (int8_t)(dbx_lk_get(pat, 2, i, s) * DBX_LK_UNIT[2]), (int8_t)(dbx_lk_get(pat, 3, i, s) * DBX_LK_UNIT[3])};         /* and PAN, in the lane's units) */
     if (n < 1)
@@ -542,6 +622,7 @@ static void dbx_song_start(void)
         dbx_song.cur = 0;
         dbx_song.done = 0;
         dbx_seq.pp = dbx_song.pat[0];
+        dbx_seq.ps = 0;
     }
 }
 
@@ -553,7 +634,8 @@ static void dbx_seq_step(int32_t tb_q8)
     if (l == 0u)
         l = 1u;
     int32_t len = (int32_t)dbx_seq.step_q8;
-    const dbx_pat_t *ps = &dbx_seq.pat[dbx_seq.pp], *pn;
+    const dbx_pat_t *ps = DBX_PATV((uint32_t)dbx_seq.pp + DBX_NPAT * dbx_seq.ps), *pn;
+    uint32_t csec = dbx_seq.ps;                     /* the section the step now belongs to */
     dbx_seq.tl = (uint8_t)((dbx_seq.tl + 1u) % DBX_NSTEP);
     if (dbx_seq.rep && !held)                       /* let go: the step now was the loop's, the one after is the pattern's */
         dbx_seq.rep = 0;
@@ -569,21 +651,25 @@ static void dbx_seq_step(int32_t tb_q8)
     nx = dbx_seq.rep ? ((uint32_t)dbx_seq.rep_s + (dbx_seq.rep_i + 1u) % dbx_seq.rep_l) % DBX_NSTEP
                      : (dbx_seq.tl + 1u) % DBX_NSTEP;
     dbx_seq.cur = (uint8_t)s;
+    dbx_seq.cs = (uint8_t)csec;
     dbx_seq.nxq = (uint8_t)nx;
     dbx_seq.steps_done++;
     dbx_lfo_sync(++dbx_seq.pos);                    /* (0 at the first step after a start) */
-    if (s == 0u && !dbx_seq.rep) {
-        dbx_seq.pass++;
-        dbx_snap_sync();                                /* a new pass: the pattern that comes in brings its sound */
+    if (s == 0u && !dbx_seq.rep)
+        dbx_seq.pass++;                                 /* (a section's pass: the mutation counts them) */
+    if (nx == 0u && !dbx_seq.rep) {                 /* (the pattern that waits comes in with the pattern's own pass, after its second section; or the song's next) */
+        if (((dbx_seq.two >> dbx_seq.pp) & 1u) && dbx_seq.ps == 0u)
+            dbx_seq.ps = 1;                         /* the second section follows the first */
+        else {
+            dbx_seq.ps = 0;
+            if (dbx_seq.pq != 255u) {
+                dbx_seq.pp = dbx_seq.pq;
+                dbx_seq.pq = 255;
+            } else if (dbx_song_active())
+                dbx_song_advance();
+        }
     }
-    if (nx == 0u && !dbx_seq.rep) {                 /* (the pattern that waits comes in with the pattern's own pass; or the song's next) */
-        if (dbx_seq.pq != 255u) {
-            dbx_seq.pp = dbx_seq.pq;
-            dbx_seq.pq = 255;
-        } else if (dbx_song_active())
-            dbx_song_advance();
-    }
-    pn = &dbx_seq.pat[dbx_seq.pp];
+    pn = DBX_PATV((uint32_t)dbx_seq.pp + DBX_NPAT * dbx_seq.ps);
     for (i = 0; i < DBX_NLANE; i++) {
         if (dbx_seq.first && dbx_plays(ps, i, s))
             dbx_sched(ps, i, s, tb_q8, 1);
@@ -621,8 +707,6 @@ static void dbx_seq_block(uint32_t n)
 #endif
     pulses = dbx_seq.ext_rx - dbx_seq.ext_seen;
     dbx_seq.ext_seen += pulses;
-    if (!dbx_seq.playing)                  /* stopped: the sound of the pattern picked is the live one at once */
-        dbx_snap_sync();
     if (dbx_seq.flush_mask) {
         uint32_t m = dbx_seq.flush_mask;
         dbx_seq.flush_mask = 0;
@@ -639,7 +723,7 @@ static void dbx_seq_block(uint32_t n)
     }
     if (dbx_seq.pv_req) {                  /* a preview: that step, now, as it is set (no nudge, no chance) */
         dbx_seq.pv_req = 0;
-        dbx_sched(&dbx_seq.pat[dbx_seq.pv_pat], dbx_seq.pv_lane, dbx_seq.pv_step, 0, 0);
+        dbx_sched(DBX_PATV((uint32_t)dbx_seq.pv_pat), dbx_seq.pv_lane, dbx_seq.pv_step, 0, 0);
     }
     if (dbx_seq.playing) {
         dbx_seq.running = 1;
@@ -657,9 +741,9 @@ static void dbx_seq_block(uint32_t n)
                 dbx_seq.pl_lock = dbx_seq.pl_skip = 0;      /* (from the top: the computer's pulses fire the first beats again) */
                 dbx_seq.first = 1;
                 dbx_seq.pp = dbx_seq.pe;
+                dbx_seq.ps = (dbx_seq.two >> dbx_seq.pe) & 1u ? dbx_seq.vs : 0u;     /* (from the section shown) */
                 dbx_seq.pq = 255;
                 dbx_song_start();
-                dbx_snap_sync();                /* (its sound) */
             }
             if (dbx_seq.pl_lock) {          /* the locked loop is the clock: its pulses (the computer's are counted, they only pull it) */
                 uint32_t lim = 6250u / (dbx_seq.bpm ? dbx_seq.bpm : 120u);
@@ -702,10 +786,10 @@ static void dbx_seq_block(uint32_t n)
                 dbx_seq.pos = 0xFFFFFFFFu;
                 dbx_seq.acc_q8 = dbx_seq.step_q8;
                 dbx_seq.first = 1;
-                dbx_seq.pp = dbx_seq.pe;                 /* it plays the pattern that is shown */
+                dbx_seq.pp = dbx_seq.pe;                 /* it plays the pattern that is shown, from the section shown */
+                dbx_seq.ps = (dbx_seq.two >> dbx_seq.pe) & 1u ? dbx_seq.vs : 0u;
                 dbx_seq.pq = 255;
                 dbx_song_start();
-                dbx_snap_sync();                         /* (and its sound) */
             }
             dbx_seq.acc_q8 += (uint32_t)nq;
             while (dbx_seq.acc_q8 >= dbx_seq.step_q8) {

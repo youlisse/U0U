@@ -354,15 +354,15 @@ EXPORT void web_test_heavy(uint32_t level)
         for (e = 0; e < DBX_NLANE; e++)                /* every lane panned (the middle and side signals through the chain) */
             lane[e].pan = (int8_t)(e & 1u ? 14 : -14);
         for (e = 0; e < DBX_NLANE; e++)                /* and the mutation moving hits on every pass */
-            dbx_arp.m[e][AM_AMT - AM_AMT] = 50;
+            dbx_arp.m[0][e][AM_AMT - AM_AMT] = 50;                 /* (pattern 1's) */
         dbx_arp.p[AM_SCOPE] = 1;
     }
 }
 EXPORT uint32_t web_env(uint32_t i) { return i < EV_NP ? dbx_env.p[i] : 0xFFu; }     /* (the tests) */
 EXPORT int32_t web_duck(void) { return dbx_env.g1; }
-EXPORT uint32_t web_arp(uint32_t i) { return i < AP_NP ? (i < AM_AMT || i == AM_SCOPE ? dbx_arp.p[i] : dbx_arp.m[dbx_ui.sel][i - AM_AMT]) : 0xFFu; }     /* the selected lane's values (the tests) */
-EXPORT uint32_t web_arp_lane(uint32_t l, uint32_t i) { return l < DBX_NLANE && i < 4u ? dbx_arp.m[l][i] : 0xFFu; }     /* a lane's AMOUNT, EVERY, -, DRIFT (the tests) */
-EXPORT uint32_t web_steps_of(uint32_t lane_i) { return lane_i < DBX_NLANE ? dbx_seq.pat[dbx_seq.pe].steps[lane_i] : 0u; }
+EXPORT uint32_t web_arp(uint32_t i) { return i < AP_NP ? (i < AM_AMT || i == AM_SCOPE ? dbx_arp.p[i] : dbx_arp.m[dbx_seq.pe][dbx_ui.sel][i - AM_AMT]) : 0xFFu; }     /* the selected lane's values (the tests) */
+EXPORT uint32_t web_arp_lane(uint32_t l, uint32_t i) { return l < DBX_NLANE && i < 4u ? dbx_arp.m[dbx_seq.pe][l][i] : 0xFFu; }     /* a lane's AMOUNT, EVERY, -, DRIFT (the tests) */
+EXPORT uint32_t web_steps_of(uint32_t lane_i) { return lane_i < DBX_NLANE ? DBX_E.steps[lane_i] : 0u; }          /* (the section shown) */
 EXPORT uint32_t web_pass(void) { return dbx_seq.pass; }
 EXPORT int32_t web_lane(uint32_t i, uint32_t f)                                 /* a lane's parameter: 0 TUNE 1 DECAY 2 TONE 3 EXTRA 4 LEVEL 5 mute 6 ACCENT 7 PAN 8 CHOKE (the tests) */
 {
@@ -370,8 +370,12 @@ EXPORT int32_t web_lane(uint32_t i, uint32_t f)                                 
         return -1;
     return f == 0u ? lane[i].p.tune : f == 1u ? lane[i].p.decay : f == 2u ? lane[i].p.tone : f == 3u ? lane[i].p.extra : f == 4u ? lane[i].p.level : f == 5u ? lane[i].mute : f == 6u ? lane[i].p.accent : f == 7u ? lane[i].pan : lane[i].choke;
 }
-EXPORT uint32_t web_snap_live(void) { return dbx_snap.live; }                   /* the pattern whose sound is the live one (the tests) */
-EXPORT int32_t web_lock(uint32_t which, uint32_t lane_i, uint32_t step) { return which < 4u && lane_i < DBX_NLANE && step < DBX_NSTEP ? dbx_lk_get(dbx_seq.pe, which, lane_i, step) * DBX_LK_UNIT[which] : 0; }   /* a step's own DECAY (0), TONE (1), EXTRA (2) or PAN (3), in the lane's units (the tests) */
+EXPORT uint32_t web_two(void) { return dbx_seq.two; }                           /* bit p: pattern p has a second section (the tests) */
+EXPORT uint32_t web_vs(void) { return dbx_seq.vs; }                             /* the section shown */
+EXPORT uint32_t web_ps(void) { return dbx_seq.ps; }                             /* the section that comes next (ISR), */
+EXPORT uint32_t web_cs(void) { return dbx_seq.cs; }                             /* the one playing */
+EXPORT uint32_t web_oct_ask(void) { return dbx_oct.ask; }                       /* the question OCT asks: 0 none, 1 double the track, 2 take the second part away */
+EXPORT int32_t web_lock(uint32_t which, uint32_t lane_i, uint32_t step) { return which < 4u && lane_i < DBX_NLANE && step < DBX_NSTEP ? dbx_lk_get(DBX_EV, which, lane_i, step) * DBX_LK_UNIT[which] : 0; }   /* a step's own DECAY (0), TONE (1), EXTRA (2) or PAN (3), in the lane's units (the tests) */
 EXPORT uint32_t web_song(uint32_t slot, uint32_t f) { return slot < DBX_NPAT ? (f == 0u ? dbx_song.pat[slot] : f == 1u ? dbx_song.rep[slot] : dbx_song.again[slot]) : 0u; }   /* a slot's pattern (255: the end), its repeat code (the tests) */
 EXPORT uint32_t web_song_on(void) { return dbx_song.on; }
 EXPORT uint32_t web_song_cur(void) { return dbx_song.cur; }
@@ -395,13 +399,13 @@ EXPORT uint32_t web_fxmaster(void) { return dbx_fx.master; }
 EXPORT int32_t web_fxamt(uint32_t e) { return e < DBX_NFX ? dbx_fx.am[e] : -1; }                  /* the amount: envelope x mixes, 0..65536 */
 EXPORT int32_t web_fxenv(uint32_t e) { return e < DBX_NFX ? dbx_fx.env[e] : -1; }                 /* the envelope, 0..65536 */
 EXPORT uint32_t web_fxparam(uint32_t e, uint32_t i) { return e < DBX_NFX && i < DBX_NFXP ? dbx_fx.p[e][i] : 0; }
-EXPORT uint32_t web_fxstep(uint32_t p, uint32_t e, uint32_t s) { return p < DBX_NPAT && e < DBX_NFX && s < DBX_NSTEP ? (dbx_seq.fx[p].on[e] >> s) & 1u : 0; }
-EXPORT uint32_t web_fxmix(uint32_t p, uint32_t e, uint32_t s) { return p < DBX_NPAT && e < DBX_NFX && s < DBX_NSTEP ? dbx_seq.fx[p].mix[e][s] : 0; }
+EXPORT uint32_t web_fxstep(uint32_t p, uint32_t e, uint32_t s) { return p < DBX_NVP && e < DBX_NFX && s < DBX_NSTEP ? (DBX_FXV(p)->on[e] >> s) & 1u : 0; }      /* (p + 16: the second section) */
+EXPORT uint32_t web_fxmix(uint32_t p, uint32_t e, uint32_t s) { return p < DBX_NVP && e < DBX_NFX && s < DBX_NSTEP ? DBX_FXV(p)->mix[e][s] : 0; }
 EXPORT uint32_t web_pe(void) { return dbx_seq.pe; }               /* the pattern shown, the one playing, the one waiting */
 EXPORT uint32_t web_pp(void) { return dbx_seq.pp; }
 EXPORT uint32_t web_pq(void) { return dbx_seq.pq; }
 EXPORT uint32_t web_pat_used(uint32_t p) { return p < DBX_NPAT ? dbx_pat_used(p) : 0; }
-EXPORT uint32_t web_step_on(uint32_t p, uint32_t l, uint32_t s) { return p < DBX_NPAT && l < DBX_NLANE && s < DBX_NSTEP ? (dbx_seq.pat[p].steps[l] >> s) & 1u : 0; }
+EXPORT uint32_t web_step_on(uint32_t p, uint32_t l, uint32_t s) { return p < DBX_NVP && l < DBX_NLANE && s < DBX_NSTEP ? (DBX_PATV(p)->steps[l] >> s) & 1u : 0; }      /* (p + 16: the second section) */
 EXPORT uint32_t web_dirty(void) { return dbx_store.set | dbx_store.pats; }    /* something not saved yet */
 EXPORT uint32_t web_saved(void) { return dbx_saved_now(); }
 EXPORT uint32_t web_vol(void) { return dbx_ui.vol; }
