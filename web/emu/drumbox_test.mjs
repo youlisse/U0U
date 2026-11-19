@@ -2074,6 +2074,27 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const held = await run(false), moved = await run(true);
   check(`TIME moved through its options while it plays: the largest edge ${moved.toFixed(3)} against ${held.toFixed(3)} held`, moved < held * 2.5);
 }
+// ---- a pan does not make the sound louder: a hot mix, MASTER at the top, panned hard (the lanes' own PAN, the PAN effect) is as loud on its side as it is in the middle
+// (the chain used to bend the middle with a soft knee and not what a pan puts beside it: +3 dB of peak, more with a delay or a reverb on top)
+{
+  const level = async (setup) => {
+    const w = await device(); w.render(200);
+    w.ex.web_master(1023);
+    for (const k of [0, 1, 2, 3]) { w.key(BLACK[k], 20); w.setSteps([...Array(16).keys()]); w.turn(EN.K4, 20); }
+    setup(w);
+    w.render(1500);
+    w.ex.web_buttons(1 << B.PLAY); w.render(1500);
+    const c = w.cap(4000); w.ex.web_buttons(0);
+    let tl = 0, tr = 0, pl = 0, pr = 0; for (let i = 0; i < c.l.length; i++) { tl += c.l[i] * c.l[i]; tr += c.r[i] * c.r[i]; pl = Math.max(pl, Math.abs(c.l[i])); pr = Math.max(pr, Math.abs(c.r[i])); }
+    return { l: Math.sqrt(tl / c.l.length), r: Math.sqrt(tr / c.l.length), pl, pr };
+  };
+  const db = (a, b) => 20 * Math.log10(a / b);
+  const centre = await level(() => {});
+  const lanes = await level((w) => { for (const k of [0, 1, 2, 3]) { w.key(BLACK[k], 20); w.turn(EN.ALGO, 32); } });
+  const fx = await level((w) => { w.btn(B.FX); w.key(BLACK[FX.PAN], 30); w.ex.web_set_fxparam(FX.PAN, 0, 127); w.ex.web_set_fxparam(FX.PAN, 6, 127); w.btn(B.HOME); });
+  check(`the lanes panned hard right: the right side is ${db(lanes.r, centre.r).toFixed(1)} dB (rms) and ${db(lanes.pr, centre.pr).toFixed(1)} dB (peak) from the centre's: the same`, Math.abs(db(lanes.r, centre.r)) < 0.7 && Math.abs(db(lanes.pr, centre.pr)) < 0.7);
+  check(`  the PAN effect hard right: ${db(fx.r, centre.r).toFixed(1)} dB (rms), ${db(fx.pr, centre.pr).toFixed(1)} dB (peak)`, Math.abs(db(fx.r, centre.r)) < 0.7 && Math.abs(db(fx.pr, centre.pr)) < 0.7);
+}
 // ---- the filters (LOW PASS, BAND PASS) come last: a filter on the step where an echo comes shapes the echo too (it sat ahead of the delay, which echoed the unfiltered sound)
 {
   const echoHighs = async (withLp) => {

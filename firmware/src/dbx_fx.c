@@ -707,7 +707,7 @@ static void dbx_fx_process(const int32_t *mix, const int32_t *side, int32_t *l, 
     uint32_t i, duck = 1;
     dbx_fx_amounts(a0, a1);
     for (i = 0; i < n; i++) {
-        m[i] = dbx_limit(mix[i]);
+        m[i] = dbx_c17(mix[i]);                         /* (no soft knee here: it bent the middle and not what a pan, a delay or a reverb adds beside it, so those came out louder than the dry could be; the output limiter, last, is the one ceiling) */
         sd[i] = side[i];
     }
     dbx_lfo_volume(m, sd, n);                           /* LFO 1: the volume, before every effect (of the middle and of what the lanes' pans add) */
