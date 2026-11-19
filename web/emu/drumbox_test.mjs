@@ -2017,6 +2017,19 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const e = await lone(127);
   check(`  a lone echo at full MIX stays about 7 dB under its hit, the guard does not touch it (${e.toFixed(1)} dB)`, e > -8 && e < -6);
 }
+// ---- the DELAY line does not fold: six drums on every step, full MIX, FEEDBACK at the top (the line used to clamp hard at its 16 bits, the feedback building it up)
+{
+  const w = await device(); w.render(200);
+  const all = [...Array(16).keys()];
+  for (const k of [0, 1, 2, 3, 4, 5]) { w.key(BLACK[k], 20); w.setSteps(all); }
+  w.btn(B.FX); w.key(BLACK[7], 30); for (let st = 0; st < 16; st++) w.key(WHITE[st], 10); w.btn(B.HOME); w.fxSet(FX.DELAY, 1, 127); w.fxSet(FX.DELAY, 7, 127); w.btn(B.HOME);
+  w.ex.web_buttons(1 << B.PLAY); w.render(2500);
+  const c = Array.from(w.cap(4000).l); w.ex.web_buttons(0);
+  let e = 0, d3 = 0, pk = 0;
+  for (let i = 3; i < c.length; i++) { e += c[i] * c[i]; pk = Math.max(pk, Math.abs(c[i])); const d = c[i] - 3 * c[i - 1] + 3 * c[i - 2] - c[i - 3]; d3 += d * d; }
+  const edge = Math.sqrt(d3 / e);
+  check(`a busy mix into the DELAY at full FEEDBACK: the edge energy ${edge.toFixed(3)} (0.345 with the hard clamp), the peak ${pk.toFixed(2)} under 0 dBFS`, edge < 0.32 && pk < 0.9);
+}
 // ---- the filters (LOW PASS, BAND PASS) come last: a filter on the step where an echo comes shapes the echo too (it sat ahead of the delay, which echoed the unfiltered sound)
 {
   const echoHighs = async (withLp) => {

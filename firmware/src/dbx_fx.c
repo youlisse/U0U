@@ -458,8 +458,8 @@ static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
             dly.dt[ch] = tt[ch];
     }
     for (i = 0; i < n; i++, a += da) {
-        int32_t rl = dly_buf[0][(dly.w + DLY_LEN - (uint32_t)dly.dt[0]) % DLY_LEN];
-        int32_t rr = dly_buf[1][(dly.w + DLY_LEN - (uint32_t)dly.dt[1]) % DLY_LEN];
+        int32_t rl = dly_buf[0][(dly.w + DLY_LEN - (uint32_t)dly.dt[0]) % DLY_LEN] * 2;
+        int32_t rr = dly_buf[1][(dly.w + DLY_LEN - (uint32_t)dly.dt[1]) % DLY_LEN] * 2;
         int32_t in = ((((l[i] + r[i]) >> 3)) * (a >> 1)) >> 13, fl_ = dbx_lp1(&dly.flp[0], rl, DLY_TONE_K),
                 fr_ = dbx_lp1(&dly.flp[1], rr, DLY_TONE_K), wl, wr, ol = rl, or_ = rr;
         if (pong) {                                                                   /* the input in the left line, each echo into the other */
@@ -471,8 +471,10 @@ static void fx_delay(int32_t *l, int32_t *r, uint32_t n, int32_t a0, int32_t a1)
             wl = in + ((fl_ * fb) >> 15);
             wr = in + ((fr_ * fb) >> 15);
         }
-        dly_buf[0][dly.w] = (int16_t)dbx_c16(wl);
-        dly_buf[1][dly.w] = (int16_t)dbx_c16(wr);
+        /* the line holds half the level (a 16-bit line, and the chain above it runs to 4 times that: a busy mix with a high FEEDBACK reached its end, and the
+         * hard clamp that was here folded it, the feedback building the fold up); what is over half its range is bent by the soft knee, as a tape delay does */
+        dly_buf[0][dly.w] = (int16_t)dbx_hard(dbx_limit((wl + 1) >> 1));
+        dly_buf[1][dly.w] = (int16_t)dbx_hard(dbx_limit((wr + 1) >> 1));
         if (++dly.w >= DLY_LEN)
             dly.w = 0;
         l[i] += ol >> 1;                               /* (the echo at half the line's level: -6 dB under the send; it was 3/4, and the echoes stood out) */
