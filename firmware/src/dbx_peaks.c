@@ -112,14 +112,14 @@ static void pk_init(pk_t *s, uint32_t model)
 }
 
 /* the parameters of one block: note16 the pitch (1/16 semitone, TUNE and the hit's own included), decay tone extra 0..127 */
-typedef struct { int32_t note16, decay, tone, extra; } pk_par_t;
+typedef struct { int32_t note16, decay, tone, extra, p3, p4; } pk_par_t;     /* (p3, p4: the lane's second page, 0..15, 8 as Peaks has it) */
 
 static void pk_trigger(pk_t *s, const pk_par_t *p)
 {
     uint32_t sn;
     switch (s->model) {
     case PKM_BD:
-        pk_exc_trig(&s->e[0], 275251);
+        pk_exc_trig(&s->e[0], 27525 * (p->p4 + 2));                /* the push: CLICK (8: Peaks' 275251) */
         pk_exc_trig(&s->e[1], -13763);
         pk_exc_trig(&s->e[2], 18000);
         break;
@@ -211,8 +211,8 @@ static void pk_run(pk_t *s, const pk_par_t *p, int32_t *y, uint32_t n)
         } else if (s->model == PKM_SD) {
             int32_t base = note;
             pk_svf_freq(&s->v[0], base);
-            pk_svf_freq(&s->v[1], base + (12 << 7));
-            pk_svf_freq(&s->v[2], base + (48 << 7));
+            pk_svf_freq(&s->v[1], base + ((4 + p->p3) << 7));                              /* the second body: BODY (8: an octave over) */
+            pk_svf_freq(&s->v[2], base + ((36 + p->p4 * 3 / 2) << 7));                     /* the noise's band: NOISE (8: 48 semitones over) */
             pk_svf_res(&s->v[0], 29000 + (int32_t)(d16 >> 5));
             pk_svf_res(&s->v[1], 26500 + (int32_t)(d16 >> 5));
             s->e[3].decay = 4092u + (d16 >> 14);
@@ -222,12 +222,15 @@ static void pk_run(pk_t *s, const pk_par_t *p, int32_t *y, uint32_t n)
             uint32_t tau = 150u << (p->decay >> 4);                                      /* DECAY: the envelope's time constant, 150 samples (3 ms) to 38000 (0.9 s) */
             tau += tau * (uint32_t)(p->decay & 15) >> 4;
             pk_svf_freq(&s->v[0], (105 << 7) + (int32_t)(t16 >> 5) - 1024);              /* TONE moves the band by +-8 semitones */
+            pk_svf_res(&s->v[0], 16000 + p->p4 * 1000);                                  /* METAL: how tonal the band is (8: Peaks' 24000) */
+            pk_svf_freq(&s->v[1], (100 + p->p3 * 5 / 4) << 7);                           /* BRIGHT: the high-pass (8: note 110) */
             s->e[0].decay = (1u << 20) / tau;                                            /* (Q20 of the fall a sample) */
         } else {
             int32_t fl = note - (24 << 7);
             uint32_t f = fl < 0 ? 0u : (uint32_t)fl * 65536u / (72u << 7);
             f = f > 65535u ? 65535u : f;
             strength = f <= 16384u ? 1024 : f <= 32768u ? 2048 - (int32_t)(f >> 4) : 0;
+            strength = strength * p->p4 / 8;                                         /* SWEEP (8: as Peaks) */
             fm_amt = (int32_t)(((t16 >> 2) * 3u) >> 2);
             am_inc = pk_env_inc(16384u + (d16 >> 1));
             fm_inc = pk_env_inc(8192u + (d16 >> 2));
@@ -244,7 +247,7 @@ static void pk_run(pk_t *s, const pk_par_t *p, int32_t *y, uint32_t n)
                 ex += s->e[1].counter != 0 ? 16384 : 0;
                 ex += pk_exc(&s->e[1]);
                 pk_exc(&s->e[2]);
-                fq = note + (s->e[2].counter == 0 ? 0 : 17 << 7);
+                fq = note + (s->e[2].counter == 0 ? 0 : (p->p3 * 2 + 1) << 7);     /* the chirp: CHIRP semitones (8: Peaks' 17) */
                 pk_svf_freq(&s->v[0], fq);
                 res = (ex >> 4) + pk_svf(&s->v[0], ex, 1u);
                 s->lp += PK_MUL(res - s->lp, lpc) >> 15;
@@ -297,7 +300,7 @@ static void pk_run(pk_t *s, const pk_par_t *p, int32_t *y, uint32_t n)
                     s->ph[3] = 0xFFFFFFFFu;
                 if ((s->cnt++ & 3u) == 0) {                       /* the pitch, every fourth sample */
                     uint32_t ax = 65535u - pk_expo(s->ph[3]), fx = 65535u - pk_expo(s->ph[1]);
-                    s->ph[4] = pk_osc_inc(note + (int32_t)(fx * (uint32_t)fm_amt >> 16) + (int32_t)(ax * (uint32_t)strength >> 15) + (s->lp >> 6));
+                    s->ph[4] = pk_osc_inc(note + (int32_t)(fx * (uint32_t)fm_amt >> 16) + (int32_t)(ax * (uint32_t)strength >> 15) + ((s->lp * p->p3) >> 9));            /* FEEDBK: the output back into the pitch (8: Peaks' >> 6) */
                 }
                 s->ph[0] += s->ph[4];
                 mix = pk_sine(s->ph[0]);

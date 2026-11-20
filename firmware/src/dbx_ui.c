@@ -31,7 +31,7 @@
 #define DIRTY_ALL 1u
 #define DIRTY_LANE 2u                      /* the page below the grid (no full clear: the panel takes ~80 ms for a whole
                                             * screen) */
-enum { PAGE_LANE, PAGE_GLO, PAGE_EDIT, PAGE_PAT, PAGE_GLO2, PAGE_FX1, PAGE_FX2, PAGE_SCL, PAGE_LFO1, PAGE_LFO2, PAGE_ENV1, PAGE_ENV2, PAGE_ARP1, PAGE_ARP2, PAGE_EDIT2, PAGE_EDIT3 /* (gone into EDIT 2: its number stays) */, PAGE_SONG, PAGE_HELP };
+enum { PAGE_LANE, PAGE_GLO, PAGE_EDIT, PAGE_PAT, PAGE_GLO2, PAGE_FX1, PAGE_FX2, PAGE_SCL, PAGE_LFO1, PAGE_LFO2, PAGE_ENV1, PAGE_ENV2, PAGE_ARP1, PAGE_ARP2, PAGE_EDIT2, PAGE_EDIT3 /* (gone into EDIT 2: its number stays) */, PAGE_SONG, PAGE_HELP, PAGE_LANE2 };
 #define DBX_RED_LIGHT 0xFB6Du                   /* ERASE: a light red of its own, in every palette (255, 110, 110) ... */
 #define DBX_RED_WARN 0xF9E7u                    /* ... and a stronger one from half the turn (255, 60, 60) */
 #define DBX_GREEN 0xC7B1u                       /* #c5f78b (197, 247, 139): the colour of everything that is shown (the text, the values,
@@ -196,9 +196,11 @@ static void dbx_solo(uint32_t l)
         lane[i].mute = alone ? 0u : (i != l);
 }
 
+static uint8_t dbx_lane_tap = 255;                     /* the lane whose key was the last thing pressed (255: another key or button, or a page, came since) */
 static void dbx_set_page(uint32_t p)
 {
     if (dbx_ui.page != p) {
+        dbx_lane_tap = 255;
         if (dbx_ui.page == PAGE_HELP || p == PAGE_HELP)
             dbx_ui.dirty |= DIRTY_ALL;                  /* (the help is a whole screen of its own: in, and out, the frame is drawn again) */
         dbx_ui.page = (uint8_t)p;
@@ -390,6 +392,8 @@ static void dbx_ui_input(void)
                 dbx_set_page(PAGE_LANE);
         }
     }
+    if (btn || (pressed & DBX_WHITE_MASK))
+        dbx_lane_tap = 255;                             /* (a button or a step key between: the next lane key is a first press) */
     for (k = 0; k < DBX_NKEY; k++) {
         if (!((pressed >> k) & 1u))
             continue;
@@ -399,7 +403,13 @@ static void dbx_ui_input(void)
             dbx_mute_st[DBX_LANE_OF_KEY[k]] = 1;
             continue;
         }
+        if (DBX_LANE_OF_KEY[k] >= 0 && !fxp && !dbx_rec && DBX_LANE_OF_KEY[k] == (int8_t)dbx_lane_tap && DBX_LANE_OF_KEY[k] == (int8_t)dbx_ui.sel && (dbx_ui.page == PAGE_LANE || dbx_ui.page == PAGE_LANE2)) {
+            dbx_set_page(dbx_ui.page == PAGE_LANE ? PAGE_LANE2 : PAGE_LANE);        /* the lane's key twice in a row: its second page (EXTRA, ACCENT and a Peaks model's own knobs), and back */
+            dbx_lane_tap = dbx_ui.sel;
+            continue;
+        }
         if (DBX_LANE_OF_KEY[k] >= 0) {                  /* a black key: its lane selected (it makes no sound), */
+            dbx_lane_tap = (uint8_t)DBX_LANE_OF_KEY[k];
             if (fxp)                                    /* on the FX pages its effect */
                 dbx_ui.fxsel = (uint8_t)DBX_LANE_OF_KEY[k];
             else {
@@ -531,7 +541,7 @@ static void dbx_ui_input(void)
     if (s_algo != 0 && fxp) {                           /* the effect before / after */
         dbx_ui.fxsel = (uint8_t)(((int32_t)dbx_ui.fxsel + s_algo % (int32_t)DBX_NFX + (int32_t)DBX_NFX) % (int32_t)DBX_NFX);
         dbx_ui.dirty |= DIRTY_LANE;
-    } else if (s_algo != 0 && (dbx_ui.page == PAGE_LANE || dbx_ui.page == PAGE_EDIT || dbx_ui.page == PAGE_EDIT2)) {
+    } else if (s_algo != 0 && (dbx_ui.page == PAGE_LANE || dbx_ui.page == PAGE_LANE2 || dbx_ui.page == PAGE_EDIT || dbx_ui.page == PAGE_EDIT2)) {
         lane[i].pan = (int8_t)clamp((int32_t)lane[i].pan + s_algo, -32, 32);     /* ALGORITHM on a lane's pages: its PAN (the black keys pick the lane) */
         dbx_touch_set();
         dbx_ui.dirty |= DIRTY_LANE;
@@ -731,6 +741,21 @@ static void dbx_ui_input(void)
         return;
     }
     l = &lane[i];
+    if (dbx_ui.page == PAGE_LANE2) {                    /* the second page: EXTRA, ACCENT and, for a Peaks model, its two own knobs */
+        if (s_k[0])
+            l->p.extra = (uint8_t)clamp((int32_t)l->p.extra + s_k[0] * 2, 0, 127);
+        if (s_k[1])
+            l->p.accent = (uint8_t)clamp((int32_t)l->p.accent + s_k[1] * 2, 0, 127);
+        if (l->pkm && s_k[2])
+            l->px = (uint8_t)((l->px & 0xF0u) | (uint32_t)clamp((int32_t)(l->px & 15u) + s_k[2], 0, 15));
+        if (l->pkm && s_k[3])
+            l->px = (uint8_t)((l->px & 15u) | (uint32_t)clamp((int32_t)(l->px >> 4) + s_k[3], 0, 15) << 4);
+        if (s_k[0] | s_k[1] | ((s_k[2] | s_k[3]) && l->pkm)) {
+            dbx_touch_set();
+            dbx_ui.dirty |= DIRTY_LANE;
+        }
+        return;
+    }
     if (s_k[0] | s_k[1] | s_k[2] | s_k[3])
         dbx_touch_set();                                /* the kit is saved too */
     if (s_k[0]) {
@@ -1241,18 +1266,36 @@ static void dbx_row_choice(uint32_t i, const char *label, const char *value, uin
         lcd_fill(12u + k * (w + 3u), y + 15u, w, 3, k == at ? T_THEME : T_LINE);
 }
 
+static const char *const DBX_EXTRA_NAME[DVT_COUNT] = {"DRIVE", "DRIVE", "SNAPPY", "SPREAD", "SIZZLE", "SIZZLE", "BEND", "BEND", "DRIVE", "DRIVE", "STRIKE", "STRIKE"};
 static void dbx_draw_lane_page(void)
 {
     static const char *const NAME[4] = {"TUNE", "DECAY", "TONE", "LEVEL"};
     const dbx_lane_t *l = &lane[dbx_ui.sel];
     uint32_t i;
     draw_text_line(12, TITLE_Y, 216, &AF_L, DBX_NAME[dbx_ui.sel], T_THEME, T_BG, 0);
-    if (lane[dbx_ui.sel].mute)
-        draw_text_line(112, TITLE_Y + 10u, 56, &AF_S, "MUTED", DBX_RED_LIGHT, T_BG, 2);
+    draw_text_line(112, TITLE_Y + 10u, 56, &AF_S, lane[dbx_ui.sel].mute ? "MUTED" : dbx_ui.page == PAGE_LANE2 ? "2/2" : "", lane[dbx_ui.sel].mute ? DBX_RED_LIGHT : T_MID, T_BG, 2);
     {
         char pv[16] = "PAN ";
         dbx_cat_pan(pv, lane[dbx_ui.sel].pan);
         draw_text_line(170, TITLE_Y + 10u, 58, &AF_S, pv, lane[dbx_ui.sel].pan ? T_THEME : T_MID, T_BG, 2);
+    }
+    if (dbx_ui.page == PAGE_LANE2) {                    /* the second page: EXTRA (named by the drum), ACCENT, and a Peaks model's two own knobs */
+        const char *nm[4] = {l->pkm ? DBX_PK_X[l->pkm - 1u] : DBX_EXTRA_NAME[dv_run_type(l->p.type)], "ACCENT", "", ""};
+        if (l->pkm) {
+            nm[2] = DBX_PK_P3[l->pkm - 1u];
+            nm[3] = DBX_PK_P4[l->pkm - 1u];
+        }
+        for (i = 0; i < 4u; i++) {
+            char v[12];
+            int32_t val = i == 0 ? l->p.extra : i == 1 ? l->p.accent : i == 2 ? (int32_t)(l->px & 15u) : (int32_t)(l->px >> 4);
+            if (!nm[i][0]) {                            /* (a knob this lane has not: its row empty) */
+                lcd_fill(12, ROW_Y + i * ROW_PITCH, 216, ROW_PITCH, T_BG);
+                continue;
+            }
+            dbx_fmt_int(v, val);
+            dbx_row(i, nm[i], v, (uint32_t)val * 216u / (i < 2u ? 127u : 15u));
+        }
+        return;
     }
     for (i = 0; i < 4u; i++) {
         char v[12];
@@ -1744,14 +1787,12 @@ static void dbx_draw_arp_view(void)
 }
 
 /* EDIT 2: the step's own DECAY, TONE, EXTRA (named by the drum) and PAN, added to the lane's (none picked: the lane's steps') */
-static const char *const DBX_EXTRA_NAME[DVT_COUNT] = {"DRIVE", "DRIVE", "SNAPPY", "SPREAD", "SIZZLE", "SIZZLE", "BEND", "BEND", "DRIVE", "DRIVE", "STRIKE", "STRIKE"};
 
 static void dbx_draw_edit2_page(void)
 {
     int32_t val[4] = {0, 0, 0, 0};
     uint32_t mixed[4] = {0, 0, 0, 0}, has = dbx_edit_values(4, 4, val, mixed), k;
-    static const char *const PKX[4] = {"PUNCH", "SNAPPY", "SIZZLE", "NOISE"};          /* (the Peaks models' EXTRA: BD SD HH FM) */
-    const char *name[4] = {"DECAY", "TONE", lane[dbx_ui.sel].pkm ? PKX[lane[dbx_ui.sel].pkm - 1u] : DBX_EXTRA_NAME[dv_run_type(lane[dbx_ui.sel].p.type)], "PAN"};
+    const char *name[4] = {"DECAY", "TONE", lane[dbx_ui.sel].pkm ? DBX_PK_X[lane[dbx_ui.sel].pkm - 1u] : DBX_EXTRA_NAME[dv_run_type(lane[dbx_ui.sel].p.type)], "PAN"};
     char v[12];
     draw_text_line(12, TITLE_Y, 216, &AF_L, "EDIT 2 STEP", T_THEME, T_BG, 0);
     for (k = 0; k < 4u; k++) {

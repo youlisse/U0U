@@ -36,7 +36,7 @@ static void dbx_snap_take(dbx_snap_t *d)                    /* the live sound in
         d->k[i].accent = lane[i].p.accent;
         d->k[i].pan = lane[i].pan;
         d->k[i].choke = lane[i].choke;                     /* (the mutes are not a pattern's: see dbx_ui.c) */
-        d->k[i].pad = 0;
+        d->k[i].pad = lane[i].px ^ 0x88u;                  /* (the second page's two knobs of a Peaks lane, from their defaults: an older save has 0, the defaults) */
     }
     for (e = 0; e < DBX_NFX; e++)
         for (k = 0; k < DBX_NFXP; k++)
@@ -71,6 +71,7 @@ static void dbx_snap_give(const dbx_snap_t *s)               /* s as the live so
         lane[i].p.accent = (uint8_t)clamp(s->k[i].accent, 0, 127);
         lane[i].pan = (int8_t)clamp(s->k[i].pan, -32, 32);
         lane[i].choke = DBX_CHOKE_DEF[i];                  /* (no page sets it: what an older save holds is not read) */
+        lane[i].px = (uint8_t)(s->k[i].pad ^ 0x88u);
     }
     for (e = 0; e < DBX_NFX; e++) {
         for (k = 0; k < DBX_NFXP; k++)

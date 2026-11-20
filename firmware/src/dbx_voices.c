@@ -51,6 +51,10 @@ static const dbx_pkl_t DBX_PK_KIT[2][DBX_NLANE] = {
         {1 + PKM_FM, 40, 60, 64, 56 * 16, 3600}, {1 + PKM_FM, 8, 120, 90, 84 * 16, 2250}, {1 + PKM_FM, 5, 30, 64, 79 * 16, 3000},
         {1 + PKM_FM, 70, 127, 64, 77 * 16, 1100}, {1 + PKM_HH, 110, 100, 0, 0, 2200}},
 };
+/* the names of a Peaks model's knobs on the lane's second page: EXTRA, then the two of its own (BD SD HH FM) */
+static const char *const DBX_PK_X[4] = {"PUNCH", "SNAPPY", "SIZZLE", "NOISE"};
+static const char *const DBX_PK_P3[4] = {"CHIRP", "BODY", "BRIGHT", "FEEDBK"};
+static const char *const DBX_PK_P4[4] = {"CLICK", "NOISE", "METAL", "SWEEP"};
 static const dbx_pkl_t *dbx_pk_of(uint32_t pos, uint32_t i)   /* the Peaks lane of the kit at that place, or 0 */
 {
     uint32_t id = DBX_KIT_ID[pos];
@@ -101,6 +105,7 @@ typedef struct {
     uint8_t choke;                         /* its choke group, 0 (none) or 1: a hit cuts the voices of the others of its group (the two hats; no page sets it) */
     uint32_t age;                          /* samples since the last hit (the ENV page's attack and gate follow it) */
     uint8_t pkm;                           /* the kits 808 and FM: the Peaks model the lane plays + 1 (dbx_peaks.c), 0: its own drum */
+    uint8_t px;                            /* ... and its two parameters of the lane's second page, a nibble each (the low one the third knob, the high one the fourth): 8 and 8 as Peaks has it */
     pk_t pk;
     uint8_t smp;                           /* the kit BREAK: the lane plays its slice of the break, not drum_voice.c */
     uint32_t bpos;                         /* ... where in the slice, in source samples, Q16 */
@@ -132,6 +137,7 @@ static void dbx_kit_apply(uint32_t kit, uint32_t reset)
         dv_default(&l->p, t);
         const dbx_pkl_t *pk = dbx_pk_of(kit, i);
         l->pkm = pk ? pk->m : 0u;
+        l->px = 0x88;
         if (pk) {                          /* 808, FM: a Peaks model (the lane's drum only gives its range and its name) */
             pk_init(&l->pk, (uint32_t)pk->m - 1u);
             l->p.decay = pk->decay;
@@ -177,6 +183,7 @@ static void dbx_voices_init(void)
         dbx_kit = 0;
         dbx_kit_run = 0;
         l->vg = dbx_vel_gain(DBX_VEL_DEF);
+        l->px = 0x88;
         l->semi = 0;
         l->mute = 0;
         l->pan = 0;
@@ -374,6 +381,8 @@ static void dbx_voices_render(int32_t *mix, int32_t *side, uint32_t n)
             pp.decay = pe.decay;
             pp.tone = pe.tone;
             pp.extra = pe.extra;
+            pp.p3 = l->px & 15;
+            pp.p4 = l->px >> 4;
             pk_run(&l->pk, &pp, y, n);
             l->v.live = l->pk.live;
             out = (int32_t)((pk ? pk->gain : 0u) * (uint32_t)pe.level / 100u);

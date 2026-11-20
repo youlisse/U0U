@@ -1740,6 +1740,47 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   }
 }
 
+// ---- the lane's key twice in a row opens its second page (EXTRA, ACCENT and, for a Peaks model, its own two knobs); a step key or a button in between starts again
+{
+  const w = await device(); w.render(200);
+  const P2 = 18;
+  w.key(BLACK[0], 20);
+  check(`the kick's key once (the kick is already picked): the lane page stays (${w.ex.web_page()})`, w.ex.web_page() === 0);
+  w.key(BLACK[0], 20);
+  check(`  the same key again: the second page (${w.ex.web_page()})`, w.ex.web_page() === P2);
+  const e0 = w.ex.web_lane(0, 3), a0 = w.ex.web_lane(0, 6), t0 = w.ex.web_lane(0, 0);
+  w.turn(EN.K1, 5); w.turn(EN.K2, 4);
+  check(`  KNOB 1 is EXTRA (${e0} to ${w.ex.web_lane(0, 3)}), KNOB 2 ACCENT (${a0} to ${w.ex.web_lane(0, 6)}), TUNE stays (${w.ex.web_lane(0, 0) === t0})`, w.ex.web_lane(0, 3) === e0 + 10 && w.ex.web_lane(0, 6) === a0 + 8 && w.ex.web_lane(0, 0) === t0);
+  w.turn(EN.K3, 3);
+  check("  a drum of Felucca's has no third knob: nothing moves", w.ex.web_px(0) === 0x88);
+  w.key(BLACK[0], 20);
+  check(`  the key once more: back on the first page (${w.ex.web_page()})`, w.ex.web_page() === 0);
+  w.key(WHITE[3], 10); w.key(BLACK[0], 20); w.key(WHITE[3], 10); w.key(BLACK[0], 20);
+  check(`  a step key between the two presses: no second page (${w.ex.web_page()})`, w.ex.web_page() === 0);
+  w.key(WHITE[3], 10); w.key(BLACK[0], 20); w.key(BLACK[1], 20); w.key(BLACK[0], 20);
+  check(`  another lane's key between: no second page either (${w.ex.web_page()})`, w.ex.web_page() === 0);
+  w.btn(B.GLO); w.btn(B.GLO); w.btn(B.GLO);
+  w.key(BLACK[0], 20);
+  check(`  after a page of another button: a first press again (${w.ex.web_page()})`, w.ex.web_page() === 0);
+  // a Peaks lane: its two own knobs, as Peaks has them to start, moving the sound, and saved
+  const setKit = (k) => { w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, k - w.ex.web_kit()); w.btn(B.HOME); w.render(400); };
+  setKit(2);
+  const hit = () => { w.key(BLACK[0], 20); w.ex.web_keys(1 << WHITE[15]); const c = w.cap(400); w.ex.web_keys(0); w.render(100); w.key(WHITE[15], 20); return c.l; };
+  check(`the 808's kick starts on 8 and 8 (${w.ex.web_px(0).toString(16)})`, w.ex.web_px(0) === 0x88);
+  const base = Array.from(hit());
+  w.key(BLACK[0], 20); w.key(BLACK[0], 20);
+  w.turn(EN.K3, -8); w.turn(EN.K4, 7);
+  check(`  KNOB 3 and 4 move its CHIRP and CLICK (${w.ex.web_px(0).toString(16)}: 0 and f)`, w.ex.web_px(0) === 0xF0);
+  w.key(BLACK[0], 20);
+  const moved = Array.from(hit());
+  let d = 0, e = 0; for (let i = 0; i < base.length; i++) { d += Math.abs(base[i] - moved[i]); e += Math.abs(base[i]); }
+  check(`  and the kick sounds different (${(d / e).toFixed(2)} of its own size)`, d / e > 0.1);
+  w.turn(EN.K1, 0);
+  w.render(3500);
+  const r = await device(w.flash()); r.render(300);
+  check(`  they are saved with the sound (${r.ex.web_px(0).toString(16)}, kit ${r.ex.web_kit()})`, r.ex.web_px(0) === 0xF0 && r.ex.web_kit() === 2);
+}
+
 // ---- the LFO button: two LFOs, LFO 1 on the volume, LFO 2 on the pan (RATE, AMOUNT, SHAPE, PHASE), locked to the tempo
 {
   const PG = { LFO1: 8, LFO2: 9 };

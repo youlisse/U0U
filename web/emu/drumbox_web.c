@@ -372,6 +372,7 @@ EXPORT int32_t web_lane(uint32_t i, uint32_t f)                                 
         return -1;
     return f == 0u ? lane[i].p.tune : f == 1u ? lane[i].p.decay : f == 2u ? lane[i].p.tone : f == 3u ? lane[i].p.extra : f == 4u ? lane[i].p.level : f == 5u ? lane[i].mute : f == 6u ? lane[i].p.accent : f == 7u ? lane[i].pan : lane[i].choke;
 }
+EXPORT uint32_t web_px(uint32_t i) { return i < DBX_NLANE ? lane[i].px : 0u; }             /* a lane's two knobs of the second page, a nibble each (the tests) */
 EXPORT uint32_t web_px_filled(void) { uint32_t n = web_px_fill; web_px_fill = 0; return n; }   /* the pixels written by lcd_fill since the last call (the tests) */
 EXPORT uint32_t web_px_blitted(void) { uint32_t n = web_px_blit; web_px_blit = 0; return n; }
 EXPORT uint32_t web_two(void) { return dbx_seq.two; }                           /* bit p: pattern p has a second section (the tests) */
