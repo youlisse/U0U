@@ -1643,7 +1643,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
 
 // ---- the kits: GLO page 2, KNOB 3 (CLASSIC (STD) and the others)
 {
-  const KITS = ["CLASSIC", "TIGHT"];
+  const KITS = ["CLASSIC", "TIGHT", "808", "FM"];
   const w = await device();
   const setKit = (k) => { w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, k - w.ex.web_kit()); w.btn(B.HOME); w.render(400); };
   const feat = (lane) => {                                   // the drum of a lane, stopped: placing step 16 plays it
@@ -1676,10 +1676,15 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     sigs.push(row);
   }
   check(`every drum of every kit sounds, and never over 0 dBFS (${bad.length ? bad.join(" ") : `all ${KITS.length * 11}`})`, bad.length === 0);
+  if (process.env.KITLEVELS) for (let k = 0; k < KITS.length; k++) { setKit(k); console.log(KITS[k].padEnd(8) + NAMES.map((n, lane) => { const f = feat(lane); return `${n}:${f.sig.split("|")[0]}/${f.pk.toFixed(2)}`; }).join(" ")); }
   const diffs = sigs.map((r) => r.filter((x, i) => x !== sigs[0][i]).length);
   check(`every model kit sounds unlike STD (lanes that differ: ${diffs.slice(1).join(" ")} of 11)`, diffs.slice(1).every((n) => n >= 4));
   const uniq = new Set(sigs.map((r) => r.join(";")));
   check(`  and the kits are all different (${uniq.size} of ${KITS.length})`, uniq.size === KITS.length);
+  const rmsOf = (k, l) => +sigs[k][l].split("|")[0];
+  const off = [];
+  for (let k = 2; k < sigs.length; k++) for (let l = 0; l < 11; l++) { const d = 20 * Math.log10((rmsOf(k, l) + 1e-9) / (rmsOf(0, l) + 1e-9)); if (Math.abs(d) > 5) off.push(`${KITS[k]}/${NAMES[l]}:${d.toFixed(1)}`); }
+  check(`the kits 808 and FM are as loud as CLASSIC, lane by lane, within 5 dB (${off.length ? off.join(" ") : "all 22 lanes"})`, off.length === 0);
   // the kick's pitch is a note in every kit, and TUNE steps by semitones inside the kit's range
   setKit(1); w.key(BLACK[0], 20);
   const n80 = w.ex.web_note16(0); w.turn(EN.K1, 1); const n80b = w.ex.web_note16(0);
@@ -1707,6 +1712,32 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const f = w.flash(); const ids = [];
   for (const base of [0xFC000, 0xFD000]) if (f[base + 256] === 0x44 && f[base + 257] === 0x42 && f[base + 258] === 0x58 && f[base + 259] === 0x31) ids.push(f[base + 256 + 11]);
   check(`the settings hold the id of TIGHT (${ids.join(",")}: 7), not its place in the list (1)`, ids.includes(7) && w.ex.web_kit() === 1);
+}
+
+// ---- the kits 808 and FM play Peaks' drum models (dbx_peaks.c): DECAY lengthens the ring, TUNE moves the pitch, and a hit is the same each time up to its noise
+{
+  const w = await device();
+  const hit = (lane, set) => {                                // the lane's hit, stopped: placing step 16 plays it
+    w.key(BLACK[lane], 20); if (set) set();
+    w.ex.web_keys(1 << WHITE[15]); const c = w.cap(1500); w.ex.web_keys(0); w.render(100);
+    w.key(WHITE[15], 20);
+    return c.l;
+  };
+  const len = (a) => { let m = 0; for (const v of a) m = Math.max(m, Math.abs(v)); let last = 0; for (let i = 0; i < a.length; i += 220) { let e = 0; for (let k = i; k < Math.min(a.length, i + 220); k++) e = Math.max(e, Math.abs(a[k])); if (e > m * 0.03) last = i + 220; } return last / 44.1; };
+  const crossings = (a, t0, t1) => { let n = 0; for (let i = Math.round(t0 * 44.1) + 1; i < Math.round(t1 * 44.1); i++) if ((a[i] < 0) !== (a[i - 1] < 0)) n++; return n; };
+  const setKit = (k) => { w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, k - w.ex.web_kit()); w.btn(B.HOME); w.render(400); };
+  for (const [k, name] of [[2, "808"], [3, "FM"]]) {
+    setKit(k);
+    const kick = hit(0), l0 = len(kick), z0 = crossings(kick, 60, 160);
+    const longer = hit(0, () => w.turn(EN.K2, 25)), l1 = len(longer);
+    w.turn(EN.K2, -25);
+    check(`${name}: the kick rings ${l0.toFixed(0)} ms and ${l1.toFixed(0)} ms with a longer DECAY`, l0 > 80 && l1 > l0 * 1.2);
+    const up = hit(0, () => w.turn(EN.K1, 12)), z1 = crossings(up, 60, 160);
+    w.turn(EN.K1, -12);
+    check(`  TUNE +12 semitones: the pitch doubles (${z0} zero crossings in 100 ms, ${z1})`, z0 >= 4 && z1 > z0 * 1.6 && z1 < z0 * 2.6);
+    const snare = hit(1);
+    check(`  the snare sounds (peak ${peakOf(snare).toFixed(2)}, ${len(snare).toFixed(0)} ms)`, peakOf(snare) > 0.05 && peakOf(snare) < 0.7 && len(snare) > 50);
+  }
 }
 
 // ---- the LFO button: two LFOs, LFO 1 on the volume, LFO 2 on the pan (RATE, AMOUNT, SHAPE, PHASE), locked to the tempo

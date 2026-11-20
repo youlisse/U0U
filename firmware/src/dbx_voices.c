@@ -7,6 +7,7 @@
 #define DBX_NLANE 11u
 #define DBX_NSTEP 16u
 #define DBX_NKEY 27u                       /* the note keys: bit k of fm1_in.notes = F3 + k semitones */
+#include "dbx_peaks.c"                    /* the Peaks drum models (the kits 808 and FM) */
 
 enum { L_KICK, L_SNARE, L_CLAP, L_HATC, L_HATO, L_TOM, L_CONGA, L_RIM, L_CLAVE, L_BELL, L_CYM };
 static const uint8_t DBX_TYPE[DBX_NLANE] = {DVT_PUNCH, DVT_SNARE, DVT_CLAP, DVT_HATC, DVT_HATO, DVT_TOM,
@@ -20,10 +21,10 @@ static const char *const DBX_NAME[DBX_NLANE] = {"KICK", "SNARE", "CLAP", "HAT CL
  * (ANALOG MINI VINTAGE METAL DISCO DEEP PERC) are not listed any more: a save that has one starts on CLASSIC. A model kit has 8 lanes (KICK SNARE CLAP
  * HAT CL HAT OP TOM RIM BELL), some of them another drum (DBX_SWAP, as eng_drum.c's DK_SWAP: 1 its TOM is a conga, 2 its RIM claves, 4 its BELL a cymbal):
  * the lane of that name takes it, and the lane it leaves keeps Felucca's own drum. */
-enum { KIT_CLASSIC = 0, KIT_TIGHT = 7, KIT_BREAK = 9 };
-#define DBX_NKIT 2u
-static const uint8_t DBX_KIT_ID[DBX_NKIT] = {KIT_CLASSIC, KIT_TIGHT};
-static const char *const DBX_KIT_NAME[DBX_NKIT] = {"CLASSIC", "TIGHT"};
+enum { KIT_CLASSIC = 0, KIT_TIGHT = 7, KIT_BREAK = 9, KIT_808 = 10, KIT_FM = 11 };
+#define DBX_NKIT 4u
+static const uint8_t DBX_KIT_ID[DBX_NKIT] = {KIT_CLASSIC, KIT_TIGHT, KIT_808, KIT_FM};
+static const char *const DBX_KIT_NAME[DBX_NKIT] = {"CLASSIC", "TIGHT", "808", "FM"};
 static uint32_t dbx_kit_pos(uint32_t id)                 /* the place of a saved id in the list (an id that is not listed: CLASSIC) */
 {
     uint32_t k;
@@ -33,6 +34,28 @@ static uint32_t dbx_kit_pos(uint32_t id)                 /* the place of a saved
     return 0;
 }
 static const uint8_t DBX_SWAP[DV_NKIT] = {0, 4, 1, 0, 2 | 4, 4, 0, 1 | 2};
+
+/* The kits 808 and FM: lanes played by dbx_peaks.c (m: PKM_* + 1; 0: the lane keeps Felucca's own drum), with the lane's note as designed, DECAY TONE and
+ * EXTRA as the kit starts them, and gain (Q12, at LEVEL 100: evens the models out with the other drums). The 808: Peaks' bass drum (the kick, and the toms
+ * tuned up and short), snare and hi-hat (the closed one, the open one, the cymbal a very long one); the FM: Peaks' FM drum all over, its hats the 808's. */
+typedef struct { uint8_t m, decay, tone, extra; int16_t note16; uint16_t gain; } dbx_pkl_t;
+static const dbx_pkl_t DBX_PK_KIT[2][DBX_NLANE] = {
+    {   /* 808 */
+        {1 + PKM_BD, 62, 64, 96, 31 * 16, 2500}, {1 + PKM_SD, 64, 64, 64, 52 * 16, 4500}, {0, 0, 0, 0, 0, 0},
+        {1 + PKM_HH, 24, 64, 0, 0, 7500}, {1 + PKM_HH, 72, 64, 0, 0, 4000}, {1 + PKM_BD, 40, 90, 40, 40 * 16, 4200},
+        {1 + PKM_BD, 24, 110, 30, 50 * 16, 5000}, {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0},
+        {1 + PKM_HH, 120, 40, 0, 0, 2600}},
+    {   /* FM */
+        {1 + PKM_FM, 70, 70, 64, 26 * 16, 2000}, {1 + PKM_FM, 45, 100, 105, 60 * 16, 2550}, {0, 0, 0, 0, 0, 0},
+        {1 + PKM_HH, 20, 100, 0, 0, 9600}, {1 + PKM_HH, 64, 100, 0, 0, 4400}, {1 + PKM_FM, 65, 80, 64, 45 * 16, 2550},
+        {1 + PKM_FM, 40, 60, 64, 56 * 16, 3600}, {1 + PKM_FM, 8, 120, 90, 84 * 16, 2250}, {1 + PKM_FM, 5, 30, 64, 79 * 16, 3000},
+        {1 + PKM_FM, 70, 127, 64, 77 * 16, 1100}, {1 + PKM_HH, 110, 100, 0, 0, 2200}},
+};
+static const dbx_pkl_t *dbx_pk_of(uint32_t pos, uint32_t i)   /* the Peaks lane of the kit at that place, or 0 */
+{
+    uint32_t id = DBX_KIT_ID[pos];
+    return (id == KIT_808 || id == KIT_FM) && DBX_PK_KIT[id - KIT_808][i].m ? &DBX_PK_KIT[id - KIT_808][i] : 0;
+}
 static uint32_t dbx_type_of(uint32_t i, uint32_t pos)   /* the drum lane i plays in the kit at that place (id 0: STD): a DVT_*, or a model kit's DV_KTYPE */
 {
     uint32_t kit = DBX_KIT_ID[pos], sw = kit && kit <= DV_NKIT ? DBX_SWAP[kit - 1u] : 0u, kl;
@@ -77,6 +100,8 @@ typedef struct {
     int16_t cg;                            /* ... and the gain of that fade, Q12 */
     uint8_t choke;                         /* its choke group, 0 (none) or 1: a hit cuts the voices of the others of its group (the two hats; no page sets it) */
     uint32_t age;                          /* samples since the last hit (the ENV page's attack and gate follow it) */
+    uint8_t pkm;                           /* the kits 808 and FM: the Peaks model the lane plays + 1 (dbx_peaks.c), 0: its own drum */
+    pk_t pk;
     uint8_t smp;                           /* the kit BREAK: the lane plays its slice of the break, not drum_voice.c */
     uint32_t bpos;                         /* ... where in the slice, in source samples, Q16 */
     int32_t blp;                           /* ... and the TONE's low-pass */
@@ -105,6 +130,14 @@ static void dbx_kit_apply(uint32_t kit, uint32_t reset)
         uint8_t lvl = l->p.level;
         uint32_t t = dbx_type_of(i, kit);
         dv_default(&l->p, t);
+        const dbx_pkl_t *pk = dbx_pk_of(kit, i);
+        l->pkm = pk ? pk->m : 0u;
+        if (pk) {                          /* 808, FM: a Peaks model (the lane's drum only gives its range and its name) */
+            pk_init(&l->pk, (uint32_t)pk->m - 1u);
+            l->p.decay = pk->decay;
+            l->p.tone = pk->tone;
+            l->p.extra = pk->extra;
+        }
         l->smp = DBX_KIT_ID[kit] == KIT_BREAK;
         if (l->smp) {                      /* BREAK: the whole slice, bright, from its start (the lane's drum only gives its pitch range and name) */
             l->p.decay = 127;
@@ -328,7 +361,26 @@ static void dbx_voices_render(int32_t *mix, int32_t *side, uint32_t n)
             if (dv_uses_metal(l->c.type))
                 dv_metal_tune(&l->mb, &l->c);
         }
-        if (l->smp)
+        if (l->pkm) {
+            const dbx_pkl_t *pk = dbx_pk_of(dbx_kit_run, i);
+            pk_par_t pp;
+            int32_t out;
+            uint32_t k2;
+            if (l->v.trig) {
+                l->v.trig = 0;
+                l->pk.trig = 1;
+            }
+            pp.note16 = (pk ? pk->note16 : 0) + pe.tune;
+            pp.decay = pe.decay;
+            pp.tone = pe.tone;
+            pp.extra = pe.extra;
+            pk_run(&l->pk, &pp, y, n);
+            l->v.live = l->pk.live;
+            out = (int32_t)((pk ? pk->gain : 0u) * (uint32_t)pe.level / 100u);
+            out += (out * (int32_t)pe.accent * 75) >> 14;
+            for (k2 = 0; k2 < n; k2++)
+                y[k2] = (y[k2] * out) >> 12;
+        } else if (l->smp)
             brk_run(l, i, &pe, y, n);
         else {
             if (dv_uses_metal(l->c.type))
@@ -346,6 +398,7 @@ static void dbx_voices_render(int32_t *mix, int32_t *side, uint32_t n)
                     l->choked = 0;
                     l->v.live = 0;                             /* (and the voice is done) */
                     l->v.trig = 0;
+                    l->pk.live = 0;
                 }
             }
             if (dbx_env.shape) {                               /* ENV: the attack and the gate */

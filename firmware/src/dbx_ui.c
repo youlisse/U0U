@@ -1750,7 +1750,8 @@ static void dbx_draw_edit2_page(void)
 {
     int32_t val[4] = {0, 0, 0, 0};
     uint32_t mixed[4] = {0, 0, 0, 0}, has = dbx_edit_values(4, 4, val, mixed), k;
-    const char *name[4] = {"DECAY", "TONE", DBX_EXTRA_NAME[dv_run_type(lane[dbx_ui.sel].p.type)], "PAN"};
+    static const char *const PKX[4] = {"PUNCH", "SNAPPY", "SIZZLE", "NOISE"};          /* (the Peaks models' EXTRA: BD SD HH FM) */
+    const char *name[4] = {"DECAY", "TONE", lane[dbx_ui.sel].pkm ? PKX[lane[dbx_ui.sel].pkm - 1u] : DBX_EXTRA_NAME[dv_run_type(lane[dbx_ui.sel].p.type)], "PAN"};
     char v[12];
     draw_text_line(12, TITLE_Y, 216, &AF_L, "EDIT 2 STEP", T_THEME, T_BG, 0);
     for (k = 0; k < 4u; k++) {
