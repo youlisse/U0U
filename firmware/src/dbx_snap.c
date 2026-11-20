@@ -43,7 +43,7 @@ static void dbx_snap_take(dbx_snap_t *d)                    /* the live sound in
             d->fx[e][k] = dbx_fx.p[e][k];
     for (k = 0; k < 4u; k++)
         d->mst[k] = dbx_mst.p[k];
-    d->kit = dbx_kit;
+    d->kit = DBX_KIT_ID[dbx_kit];
     d->fxmaster = dbx_fx.master;
     d->pad[0] = d->pad[1] = 0;
     for (k = 0; k < LFO_NP; k++) {
@@ -57,10 +57,10 @@ static void dbx_snap_take(dbx_snap_t *d)                    /* the live sound in
 static void dbx_snap_give(const dbx_snap_t *s)               /* s as the live sound */
 {
     uint32_t i, e, k;
-    if (s->kit != dbx_kit && s->kit < DBX_NKIT) {            /* another kit: the lanes are set up for its drums (here: the audio ISR) ... */
-        dbx_kit = s->kit;
-        dbx_kit_run = s->kit;
-        dbx_kit_apply(s->kit, 0);
+    if (dbx_kit_pos(s->kit) != dbx_kit) {                    /* another kit (its id; one that is no longer listed: CLASSIC): the lanes are set up for its drums (here: the audio ISR) ... */
+        dbx_kit = (uint8_t)dbx_kit_pos(s->kit);
+        dbx_kit_run = dbx_kit;
+        dbx_kit_apply(dbx_kit, 0);
     }
     for (i = 0; i < DBX_NLANE; i++) {                        /* ... then their parameters, as the pattern has them */
         lane[i].p.tune = (int16_t)clamp(s->k[i].tune, -192, 192);

@@ -68,7 +68,7 @@ static void dbx_store_load(void)
         dbx_seq.pe = dbx_seq.pp = dbx_sobj.pe < DBX_NPAT ? dbx_sobj.pe : 0u;
         dbx_seq.swing = dbx_sobj.swing <= 100u ? dbx_sobj.swing : 0u;
         dbx_fx.master = dbx_sobj.pad[0] == 0u || dbx_sobj.pad[0] > 101u ? 100u : (uint8_t)(dbx_sobj.pad[0] - 1u);   /* (stored + 1) */
-        dbx_kit = dbx_sobj.pad[1] < DBX_NKIT ? dbx_sobj.pad[1] : 0u;     /* (an older save left 0: STD) */
+        dbx_kit = (uint8_t)dbx_kit_pos(dbx_sobj.pad[1]);               /* (the kit's id: an older save left 0: STD; a kit no longer listed: STD too) */
         dbx_kit_apply(dbx_kit, 0);                                       /* (the lanes' drums first, then the parameters saved with them) */
         dbx_kit_run = dbx_kit;
         for (i = 0; i < DBX_NLANE; i++) {
@@ -230,7 +230,7 @@ static void dbx_store_poll(void)
         dbx_sobj.pe = dbx_seq.pe;
         dbx_sobj.swing = dbx_seq.swing;
         dbx_sobj.pad[0] = (uint8_t)(dbx_fx.master + 1u);
-        dbx_sobj.pad[1] = dbx_kit;
+        dbx_sobj.pad[1] = DBX_KIT_ID[dbx_kit];
         for (i = 0; i < DBX_NLANE; i++) {
             dbx_sobj.k[i].tune = lane[i].p.tune;
             dbx_sobj.k[i].decay = lane[i].p.decay;

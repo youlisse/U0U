@@ -14,19 +14,28 @@ static const uint8_t DBX_TYPE[DBX_NLANE] = {DVT_PUNCH, DVT_SNARE, DVT_CLAP, DVT_
 static const char *const DBX_NAME[DBX_NLANE] = {"KICK", "SNARE", "CLAP", "HAT CL", "HAT OP", "TOM",
                                                 "CONGA", "RIM", "CLAVE", "BELL", "CYM"};
 
-/* The kits: CLASSIC (Felucca's own drums, STD in drum_voice.c; the lanes' types above) and the 8 model kits of drum_voice.c (DV_KIT: 80 10 66 55 77 and
- * DEEP TIGHT PERC), every lane a kit's own piece. A model kit has 8 lanes (KICK SNARE CLAP HAT CL HAT OP TOM RIM BELL), some of
- * them another drum (DBX_SWAP, as eng_drum.c's DK_SWAP: 1 its TOM is a conga, 2 its RIM claves, 4 its BELL a cymbal): the lane of
- * that name takes it, and the lane it leaves keeps Felucca's own drum. */
-#define DBX_KIT_BREAK (1u + DV_NKIT)                    /* the last kit plays slices of a break, not drum_voice.c (see BREAK below) */
-#define DBX_NKIT (2u + DV_NKIT)
-/* (named by how they sound, after drum_voice.c's description of each: 80 deep sine kick and six-square hats, 10 small and bright,
- * 66 an early rhythm box, 55 a hard kick and metal cluster, 77 a swelling kick and close claps) */
-static const char *const DBX_KIT_NAME[DBX_NKIT] = {"CLASSIC", "ANALOG", "MINI", "VINTAGE", "METAL", "DISCO", "DEEP", "TIGHT", "PERC", "BREAK"};
-static const uint8_t DBX_SWAP[DV_NKIT] = {0, 4, 1, 0, 2 | 4, 4, 0, 1 | 2};
-static uint32_t dbx_type_of(uint32_t i, uint32_t kit)   /* the drum lane i plays in a kit (0: STD): a DVT_*, or a model kit's DV_KTYPE */
+/* The kits: CLASSIC (Felucca's own drums, STD in drum_voice.c; the lanes' types above), TIGHT (one of drum_voice.c's model kits, DV_KIT: every lane that kit's own
+ * piece) and the kits of the other engines below. The list is what the KIT knob walks (dbx_kit is the place in it); each kit has an id that is what is saved
+ * (so that a kit keeps its place in older saves and the list can grow): CLASSIC 0, TIGHT 7 (its DV_KIT number), then the new ones. The old model kits
+ * (ANALOG MINI VINTAGE METAL DISCO DEEP PERC) are not listed any more: a save that has one starts on CLASSIC. A model kit has 8 lanes (KICK SNARE CLAP
+ * HAT CL HAT OP TOM RIM BELL), some of them another drum (DBX_SWAP, as eng_drum.c's DK_SWAP: 1 its TOM is a conga, 2 its RIM claves, 4 its BELL a cymbal):
+ * the lane of that name takes it, and the lane it leaves keeps Felucca's own drum. */
+enum { KIT_CLASSIC = 0, KIT_TIGHT = 7, KIT_BREAK = 9 };
+#define DBX_NKIT 2u
+static const uint8_t DBX_KIT_ID[DBX_NKIT] = {KIT_CLASSIC, KIT_TIGHT};
+static const char *const DBX_KIT_NAME[DBX_NKIT] = {"CLASSIC", "TIGHT"};
+static uint32_t dbx_kit_pos(uint32_t id)                 /* the place of a saved id in the list (an id that is not listed: CLASSIC) */
 {
-    uint32_t sw = kit && kit <= DV_NKIT ? DBX_SWAP[kit - 1u] : 0u, kl;
+    uint32_t k;
+    for (k = 0; k < DBX_NKIT; k++)
+        if (DBX_KIT_ID[k] == id)
+            return k;
+    return 0;
+}
+static const uint8_t DBX_SWAP[DV_NKIT] = {0, 4, 1, 0, 2 | 4, 4, 0, 1 | 2};
+static uint32_t dbx_type_of(uint32_t i, uint32_t pos)   /* the drum lane i plays in the kit at that place (id 0: STD): a DVT_*, or a model kit's DV_KTYPE */
+{
+    uint32_t kit = DBX_KIT_ID[pos], sw = kit && kit <= DV_NKIT ? DBX_SWAP[kit - 1u] : 0u, kl;
     switch (i) {
     case L_KICK:  kl = 0; break;
     case L_SNARE: kl = 1; break;
@@ -40,7 +49,7 @@ static uint32_t dbx_type_of(uint32_t i, uint32_t kit)   /* the drum lane i plays
     case L_BELL:  kl = sw & 4u ? 8u : 7u; break;
     default:      kl = sw & 4u ? 7u : 8u; break;       /* L_CYM */
     }
-    return kit && kit <= DV_NKIT && kl < 8u ? DV_KTYPE(kit, kl) : DBX_TYPE[i];     /* (BREAK: the lane's own type, for its pitch range and name) */
+    return kit && kit <= DV_NKIT && kl < 8u ? DV_KTYPE(kit, kl) : DBX_TYPE[i];     /* (the other engines' kits: the lane's own type, for its pitch range and name) */
 }
 
 /* The keys from F3: the 11 black ones are the lanes, the 16 white ones the steps (-1: the other kind) */
@@ -96,7 +105,7 @@ static void dbx_kit_apply(uint32_t kit, uint32_t reset)
         uint8_t lvl = l->p.level;
         uint32_t t = dbx_type_of(i, kit);
         dv_default(&l->p, t);
-        l->smp = kit == DBX_KIT_BREAK;
+        l->smp = DBX_KIT_ID[kit] == KIT_BREAK;
         if (l->smp) {                      /* BREAK: the whole slice, bright, from its start (the lane's drum only gives its pitch range and name) */
             l->p.decay = 127;
             l->p.tone = 127;
