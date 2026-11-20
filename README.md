@@ -3,7 +3,7 @@
 A drum machine firmware for the **M-VAVE FM-1**: a step sequencer coupled with a step FX engine.
 
 The 16 white keys are the 16 steps, the 11 black keys are the 11 drums. On the master bus every effect has its own 16 steps, so each
-one lands on the beats you choose. Synthesized drums (9 kits), per-step timing, roll, chance and pitch, 16 patterns (each 16 or 32 steps) that chain into a
+one lands on the beats you choose. Synthesized drums (4 kits: 808, CLASSIC, FM, TIGHT), per-step timing, roll, chance and pitch, 16 patterns (each 16 or 32 steps) that chain into a
 song, two LFOs, Euclidean rhythms with mutation, and the computer's MIDI clock over USB. It runs from the FM-1's own audio output;
 nothing is sampled.
 
@@ -43,7 +43,7 @@ DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib JIELI_TOOLCHAIN=$HOME/.jieli/toolch
   AC79_SDK=$HOME/fw-AC79_AIoT_SDK python3 tools/build.py        # -> build/u0u.fwsc
 sh web/emu/build_drumbox.sh                                    # the browser build (needs Emscripten)
 node web/emu/drumbox_test.mjs                                  # the emulator's checks
-python3 web/make_site.py build/u0u.fwsc 0.3 site              # the site: emulator, installer, package
+python3 web/make_site.py build/u0u.fwsc 0.4 site              # the site: emulator, installer, package
 ```
 
 `firmware/src/drumbox.c` (with `dbx_main.c`) is the root of the build, `firmware/drumbox.ld` its memory map. The design notes, with

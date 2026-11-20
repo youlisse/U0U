@@ -23,7 +23,7 @@ DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib JIELI_TOOLCHAIN=$HOME/.jieli/toolch
   AC79_SDK=$HOME/fw-AC79_AIoT_SDK ~/.fm1-venv/bin/python tools/build.py        # colima must be running
 ```
 
-Writes `build/u0u.fwsc` (identity `FM-1_2100003`: 210 for U0U and 0003 for 0.3, free on the Firmware Hub's identity check), `build/u0u.bin` and the
+Writes `build/u0u.fwsc` (identity `FM-1_2100004`: 210 for U0U and 0004 for 0.4, free on the Firmware Hub's identity check), `build/u0u.bin` and the
 update loader. `--target felucca` builds the original firmware (`build/felucca.fwsc`) with the same tool.
 
 ## 2. Install
@@ -32,7 +32,7 @@ Web installer (Chrome or Edge, USB data cable, no other app on the FM-1's MIDI p
 (the page to try U0U in the browser is the root of the same site, with an "Install it on your FM-1" button). From a local copy:
 
 ```sh
-python3 web/make_site.py build/u0u.fwsc 0.3 site          # the emulator at /, the installer at /install/, firmware/u0u-0.3.fwsc
+python3 web/make_site.py build/u0u.fwsc 0.4 site          # the emulator at /, the installer at /install/, firmware/u0u-0.4.fwsc
 python3 -m http.server 8793 -d site --bind 127.0.0.1      # http://localhost:8793/install/
 ```
 
@@ -48,7 +48,7 @@ Do not unplug while it writes; if it is cut, install again (the FM-1 stays in up
 ## 3. First minutes
 
 1. The screen shows the logo, `U0U`, `By`, `@Y_oulisse` for 0.9 s, then the lane page. White keys light as steps, a black key plays its drum.
-2. **SEQ** (tap twice, the second sheet, the foot of it): which package is installed, `U0U v0.3  FM-1_2100003`.
+2. **SEQ** (tap twice, the second sheet, the foot of it): which package is installed, `U0U v0.4  FM-1_2100004`.
    **SEQ** (tap three times, the third sheet): the bottom line is the audio's load, `LOAD n%  PEAK m%`, with the key scan and USB
    nested in it. Press PLAY first. The desktop estimate is 30% at the worst; the board's figure is to be read here (M5.1). Near 100% the
    audio drops out.

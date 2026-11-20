@@ -16,8 +16,8 @@ Every file in this tree that carries an `SPDX-License-Identifier: GPL-3.0-only` 
 - the web pages (installer, editor, the browser emulator `web/emu/`) and their tests: `web/` (not the Fukiai and DotGothic16 fonts, below)
 - the host tests: `tests/`
 
-Four source files are ports and keep the licence of their originals:
-`firmware/src/phys_dsp.c` (DaisySP, MIT), `firmware/src/phys_symp.c` (Rings, MIT),
+Five source files are ports and keep the licence of their originals:
+`firmware/src/phys_dsp.c` (DaisySP, MIT), `firmware/src/phys_symp.c` (Rings, MIT), `firmware/src/dbx_peaks.c` (Peaks, MIT: U0U's 808 and FM kits),
 `firmware/src/fm6_core.c` (msfa, Apache-2.0) and `firmware/src/adpcm_dsp.c` (snes_spc, LGPL-2.1-or-later; built only
 with `FELUCCA_ADPCM=1`, not by default). The firmware built with them is GPL-3.0-only as a whole.
 

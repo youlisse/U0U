@@ -21,13 +21,13 @@
 #define FM1_CPU1 0
 #define FM1_CRASH_CTX_N 1u       /* chip/fm1_irq.h: the registers of the last crash only */
 #ifndef FELUCCA_ID
-#define FELUCCA_ID "FM-1_2100003" /* package identity (build.py: the .fwsc marker string): 210 (U0U) and the version (0003: 0.3), free on the hub's identity check */
+#define FELUCCA_ID "FM-1_2100004" /* package identity (build.py: the .fwsc marker string): 210 (U0U) and the version (0004: 0.4), free on the hub's identity check */
 #endif
 #ifndef FELUCCA_STAMP
 #define FELUCCA_STAMP "  " __TIME__    /* (the hour, minute and second: the title row of every sheet shows the hour and minute) when this image was compiled: the second help sheet shows it, so a flashed build can be told from the one before it (the version stays the same) */
 #endif
 #ifndef FELUCCA_VERSION
-#define FELUCCA_VERSION "v0.3"
+#define FELUCCA_VERSION "v0.4"
 #endif
 #if FELUCCA_OTA && !FELUCCA_FLASH
 #error "FELUCCA_OTA needs FELUCCA_FLASH"

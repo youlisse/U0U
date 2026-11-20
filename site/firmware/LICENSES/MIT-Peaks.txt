@@ -1,0 +1,26 @@
+The drum models of firmware/src/dbx_peaks.c (BD, SD, HH, FM) are ported from Mutable Instruments Peaks,
+Emilie Gillet's eurorack code <https://github.com/pichenettes/eurorack> (peaks/drums: bass_drum, snare_drum,
+high_hat, fm_drum, excitation, svf; peaks/resources: lookup_tables.py, waveforms.py, which tools/gen_peaks.py
+follows). Ported from C++ to C at 44.1 kHz for U0U, 2026. The ported file and the generated tables stay under the
+MIT licence below; the firmware built with them is GPL-3.0-only as a whole.
+"Mutable Instruments" is a registered trademark of its owner: U0U is not affiliated with it and does not use the name for itself.
+
+Copyright 2013 Emilie Gillet.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
