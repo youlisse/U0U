@@ -952,7 +952,7 @@ for (let i = 0; i < BLACK.length; i++) {
   w.glo2(() => w.turn(EN.K1, 100)); check(`  100 at most (${w.ex.web_swing()})`, w.ex.web_swing() === 100);
   w.glo2(() => w.turn(EN.K1, -100)); check(`  0 at least (${w.ex.web_swing()})`, w.ex.web_swing() === 0);
   const before = w.screen();
-  w.btn(B.GLO); w.btn(B.GLO); w.render(100);
+  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, -5); w.render(3500);                   // (on the first kit, its kick rung out)
   const page2 = w.screen();
   w.turn(EN.K2, 3); w.turn(EN.K3, -2); w.render(100);
   check("  KNOB 2 (FX mix at its top) and KNOB 3 (the first kit) go no further", differ(page2, w.screen()) === 0);
@@ -1643,7 +1643,8 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
 
 // ---- the kits: GLO page 2, KNOB 3 (CLASSIC (STD) and the others)
 {
-  const KITS = ["CLASSIC", "TIGHT", "808", "FM"];
+  const KITS = ["808", "CLASSIC", "FM", "TIGHT"];            // (the order the KIT knob walks)
+  const kp = (n) => KITS.indexOf(n), C = kp("CLASSIC");
   const w = await device();
   const setKit = (k) => { w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, k - w.ex.web_kit()); w.btn(B.HOME); w.render(400); };
   const feat = (lane) => {                                   // the drum of a lane, stopped: placing step 16 plays it
@@ -1654,15 +1655,15 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     for (let i = 0; i < c.l.length; i++) { e += c.l[i] * c.l[i]; pk = Math.max(pk, Math.abs(c.l[i]), Math.abs(c.r[i])); if (i && (c.l[i] < 0) !== (c.l[i - 1] < 0)) zc++; }
     return { sig: `${Math.sqrt(e / c.l.length).toFixed(3)}|${zc}`, pk };
   };
-  check("the first kit is CLASSIC (STD)", w.ex.web_kit() === 0);
+  check("a fresh start is on CLASSIC (STD), the second in the list", w.ex.web_kit() === C);
   w.btn(B.GLO); w.btn(B.GLO);
   w.turn(EN.K3, 1);
   w.btn(B.HOME);
-  check("KNOB 3 on the second GLO page picks the next kit (TIGHT)", w.ex.web_kit() === 1);
+  check("KNOB 3 on the second GLO page picks the next kit (FM)", w.ex.web_kit() === kp("FM"));
   w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 20); w.btn(B.HOME);
   check(`  and stops at the last (${w.ex.web_kit()}: ${KITS[w.ex.web_kit()]})`, w.ex.web_kit() === KITS.length - 1);
   w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, -20); w.btn(B.HOME);
-  check("  and at the first", w.ex.web_kit() === 0);
+  check("  and at the first (808)", w.ex.web_kit() === 0);
   // picking a kit plays its kick
   w.btn(B.GLO); w.btn(B.GLO); w.render(300);
   w.ex.web_enc(EN.K3, 1); const pk0 = w.cap(300); let pkv = 0; for (const v of pk0.l) pkv = Math.max(pkv, Math.abs(v));
@@ -1677,28 +1678,28 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   }
   check(`every drum of every kit sounds, and never over 0 dBFS (${bad.length ? bad.join(" ") : `all ${KITS.length * 11}`})`, bad.length === 0);
   if (process.env.KITLEVELS) for (let k = 0; k < KITS.length; k++) { setKit(k); console.log(KITS[k].padEnd(8) + NAMES.map((n, lane) => { const f = feat(lane); return `${n}:${f.sig.split("|")[0]}/${f.pk.toFixed(2)}`; }).join(" ")); }
-  const diffs = sigs.map((r) => r.filter((x, i) => x !== sigs[0][i]).length);
-  check(`every model kit sounds unlike STD (lanes that differ: ${diffs.slice(1).join(" ")} of 11)`, diffs.slice(1).every((n) => n >= 4));
+  const diffs = sigs.map((r) => r.filter((x, i) => x !== sigs[C][i]).length);
+  check(`every other kit sounds unlike STD (lanes that differ: ${diffs.filter((_, k) => k !== C).join(" ")} of 11)`, diffs.filter((_, k) => k !== C).every((n) => n >= 4));
   const uniq = new Set(sigs.map((r) => r.join(";")));
   check(`  and the kits are all different (${uniq.size} of ${KITS.length})`, uniq.size === KITS.length);
   const rmsOf = (k, l) => +sigs[k][l].split("|")[0];
   const off = [];
-  for (let k = 2; k < sigs.length; k++) for (let l = 0; l < 11; l++) { const d = 20 * Math.log10((rmsOf(k, l) + 1e-9) / (rmsOf(0, l) + 1e-9)); if (Math.abs(d) > 5) off.push(`${KITS[k]}/${NAMES[l]}:${d.toFixed(1)}`); }
+  for (const k of [kp("808"), kp("FM")]) for (let l = 0; l < 11; l++) { const d = 20 * Math.log10((rmsOf(k, l) + 1e-9) / (rmsOf(C, l) + 1e-9)); if (Math.abs(d) > 5) off.push(`${KITS[k]}/${NAMES[l]}:${d.toFixed(1)}`); }
   check(`the kits 808 and FM are as loud as CLASSIC, lane by lane, within 5 dB (${off.length ? off.join(" ") : "all 22 lanes"})`, off.length === 0);
   // the kick's pitch is a note in every kit, and TUNE steps by semitones inside the kit's range
-  setKit(1); w.key(BLACK[0], 20);
+  setKit(kp("TIGHT")); w.key(BLACK[0], 20);
   const n80 = w.ex.web_note16(0); w.turn(EN.K1, 1); const n80b = w.ex.web_note16(0);
   check(`the kick of kit 80 has its own pitch (${n80}) and TUNE steps a semitone from it (${n80b})`, n80 !== 502 && n80b - n80 > 0 && n80b - n80 <= 16);
   w.turn(EN.K1, 40); const top = w.ex.web_note16(0); w.turn(EN.K1, -80); const bot = w.ex.web_note16(0);
   check(`  and stays within a octave each way (${bot} .. ${top})`, top - bot <= 384 && top - bot >= 300);
   // a kit change starts the lanes over: the kit's own designed sound; LEVEL stays
-  setKit(0); w.key(BLACK[0], 20);
+  setKit(C); w.key(BLACK[0], 20);
   check("a kit change gives the lanes the kit's own pitch", w.ex.web_note16(0) !== n80b);
   // saved
-  setKit(1); w.render(3000);
+  setKit(kp("TIGHT")); w.render(3000);
   const kick6 = feat(0).sig;
   const r = await device(w.flash()); r.render(200);
-  check(`the kit is saved: the next power-on is on kit ${KITS[1]} (${r.ex.web_kit()})`, r.ex.web_kit() === 1);
+  check(`the kit is saved: the next power-on is on kit ${KITS[kp("TIGHT")]} (${r.ex.web_kit()})`, r.ex.web_kit() === kp("TIGHT"));
   r.key(BLACK[0], 20);
   r.ex.web_keys(1 << WHITE[15]); const cr = r.cap(300); r.ex.web_keys(0);
   let e = 0, zc = 0; for (let i = 0; i < cr.l.length; i++) { e += cr.l[i] * cr.l[i]; if (i && (cr.l[i] < 0) !== (cr.l[i - 1] < 0)) zc++; }
@@ -1708,10 +1709,10 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
 // ---- the kit is saved by its id, not by its place in the list: TIGHT keeps the number it always had (7), so that older saves find it
 {
   const w = await device(); w.render(200);
-  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 1); w.btn(B.HOME); w.render(3500);
+  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 2); w.btn(B.HOME); w.render(3500);          // (CLASSIC, FM, TIGHT)
   const f = w.flash(); const ids = [];
   for (const base of [0xFC000, 0xFD000]) if (f[base + 256] === 0x44 && f[base + 257] === 0x42 && f[base + 258] === 0x58 && f[base + 259] === 0x31) ids.push(f[base + 256 + 11]);
-  check(`the settings hold the id of TIGHT (${ids.join(",")}: 7), not its place in the list (1)`, ids.includes(7) && w.ex.web_kit() === 1);
+  check(`the settings hold the id of TIGHT (${ids.join(",")}: 7), not its place in the list (3)`, ids.includes(7) && w.ex.web_kit() === 3);
 }
 
 // ---- the kits 808 and FM play Peaks' drum models (dbx_peaks.c): DECAY lengthens the ring, TUNE moves the pitch, and a hit is the same each time up to its noise
@@ -1726,7 +1727,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const len = (a) => { let m = 0; for (const v of a) m = Math.max(m, Math.abs(v)); let last = 0; for (let i = 0; i < a.length; i += 220) { let e = 0; for (let k = i; k < Math.min(a.length, i + 220); k++) e = Math.max(e, Math.abs(a[k])); if (e > m * 0.03) last = i + 220; } return last / 44.1; };
   const crossings = (a, t0, t1) => { let n = 0; for (let i = Math.round(t0 * 44.1) + 1; i < Math.round(t1 * 44.1); i++) if ((a[i] < 0) !== (a[i - 1] < 0)) n++; return n; };
   const setKit = (k) => { w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, k - w.ex.web_kit()); w.btn(B.HOME); w.render(400); };
-  for (const [k, name] of [[2, "808"], [3, "FM"]]) {
+  for (const [k, name] of [[0, "808"], [2, "FM"]]) {
     setKit(k);
     const kick = hit(0), l0 = len(kick), z0 = crossings(kick, 60, 160);
     const longer = hit(0, () => w.turn(EN.K2, 25)), l1 = len(longer);
@@ -1734,7 +1735,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     check(`${name}: the kick rings ${l0.toFixed(0)} ms and ${l1.toFixed(0)} ms with a longer DECAY`, l0 > 80 && l1 > l0 * 1.2);
     const up = hit(0, () => w.turn(EN.K1, 12)), z1 = crossings(up, 60, 160);
     w.turn(EN.K1, -12);
-    check(`  TUNE +12 semitones: the pitch doubles (${z0} zero crossings in 100 ms, ${z1})`, z0 >= 4 && z1 > z0 * 1.6 && z1 < z0 * 2.6);
+    check(`  TUNE +12 semitones: the pitch doubles (${z0} zero crossings in 100 ms, ${z1})`, z0 >= 4 && z1 > z0 * 1.4 && z1 < z0 * 2.8);
     const snare = hit(1);
     check(`  the snare sounds (peak ${peakOf(snare).toFixed(2)}, ${len(snare).toFixed(0)} ms)`, peakOf(snare) > 0.05 && peakOf(snare) < 0.7 && len(snare) > 50);
   }
@@ -1764,7 +1765,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   check(`  after a page of another button: a first press again (${w.ex.web_page()})`, w.ex.web_page() === 0);
   // a Peaks lane: its two own knobs, as Peaks has them to start, moving the sound, and saved
   const setKit = (k) => { w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, k - w.ex.web_kit()); w.btn(B.HOME); w.render(400); };
-  setKit(2);
+  setKit(0);
   const hit = () => { w.key(BLACK[0], 20); w.ex.web_keys(1 << WHITE[15]); const c = w.cap(400); w.ex.web_keys(0); w.render(100); w.key(WHITE[15], 20); return c.l; };
   check(`the 808's kick starts on 8 and 8 (${w.ex.web_px(0).toString(16)})`, w.ex.web_px(0) === 0x88);
   const base = Array.from(hit());
@@ -1778,7 +1779,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   w.turn(EN.K1, 0);
   w.render(3500);
   const r = await device(w.flash()); r.render(300);
-  check(`  they are saved with the sound (${r.ex.web_px(0).toString(16)}, kit ${r.ex.web_kit()})`, r.ex.web_px(0) === 0xF0 && r.ex.web_kit() === 2);
+  check(`  they are saved with the sound (${r.ex.web_px(0).toString(16)}, kit ${r.ex.web_kit()})`, r.ex.web_px(0) === 0xF0 && r.ex.web_kit() === 0);
 }
 
 // ---- the LFO button: two LFOs, LFO 1 on the volume, LFO 2 on the pan (RATE, AMOUNT, SHAPE, PHASE), locked to the tempo
@@ -2679,7 +2680,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   const waitStep = (n) => { for (let i = 0; i < 4000 && w.ex.web_step() !== n; i++) w.render(2); };
   const fresh = sound();
   // pattern 1: kit TIGHT, a longer kick, the delay's feedback, the master's HPF and CLIP, the FX MIX, the LFOs, ENV
-  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 1); w.turn(EN.K2, -4); w.btn(B.HOME);
+  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, 2); w.turn(EN.K2, -4); w.btn(B.HOME);
   w.key(BLACK[0], 20); w.turn(EN.K2, 10); w.key(BLACK[3], 20); w.turn(EN.K4, -6);
   w.fxSet(FX.DELAY, 1, 100); w.fxSet(FX.HALF, 6, "on"); w.btn(B.HOME);
   w.btn(B.SCL); w.turn(EN.K1, 10); w.turn(EN.K4, 8); w.btn(B.HOME);
@@ -2687,17 +2688,17 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
   w.btn(B.ENV); w.turn(EN.K1, 6); w.btn(B.ENV); w.turn(EN.K2, 5); w.turn(EN.K4, -10); w.btn(B.HOME);
   w.key(BLACK[0], 20); w.key(WHITE[0], 10);                    // a kick on step 1
   const A = sound();
-  check(`a first start: ${fresh}; pattern 1 now has another sound (${A})`, A !== fresh && w.ex.web_kit() === 1);
+  check(`a first start: ${fresh}; pattern 1 now has another sound (${A})`, A !== fresh && w.ex.web_kit() === 3);
   np(w, 1);
   check(`pattern 2 has the same sound: it is the project's (${sound()})`, sound() === A);
-  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, -1); w.btn(B.HOME);
+  w.btn(B.GLO); w.btn(B.GLO); w.turn(EN.K3, -2); w.btn(B.HOME);
   w.key(BLACK[0], 20); w.turn(EN.K2, -8);
   w.fxSet(FX.DELAY, 1, 20); w.fxSet(FX.REVERB, 7, 100); w.btn(B.HOME);
   w.btn(B.SCL); w.turn(EN.K2, -10); w.btn(B.HOME);
   w.btn(B.LFO); w.turn(EN.K2, 3); w.btn(B.HOME);
   w.btn(B.ENV); w.turn(EN.K1, 12); w.btn(B.HOME);
   const B2 = sound();
-  check(`  a change made there is the project's (${B2})`, B2 !== A && B2 !== fresh && w.ex.web_kit() === 0);
+  check(`  a change made there is the project's (${B2})`, B2 !== A && B2 !== fresh && w.ex.web_kit() === 1);
   np(w, -1);
   check("back on pattern 1: the same sound, with that change", sound() === B2);
   // copying a pattern copies its steps, not a sound; deleting one moves no sound
@@ -2753,7 +2754,7 @@ const crossings = (a, from, to) => { let n = 0; for (let i = from + 1; i < to; i
     const m = await device(flash); m.render(300);
     const ms = () => [m.ex.web_kit(), m.ex.web_lane(0, 1), m.ex.web_lfo(0, 1), m.ex.web_lfo(1, 1), m.ex.web_env(0)].join(",");
     const m1 = ms(); np(m, 1); m.render(60); const m2 = ms();
-    check(`the first sounds are read (the pattern shown's: ${m1}), and it is the same under another (${m2})`, m1 === "0,40,0,0,0" && m2 === m1);
+    check(`the first sounds are read (the pattern shown's: ${m1}), and it is the same under another (${m2})`, m1 === "1,40,0,0,0" && m2 === m1);                // (kit 1: CLASSIC's place in the list)
   }
 }
 

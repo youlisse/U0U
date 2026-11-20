@@ -159,7 +159,7 @@ static void dbx_reset_all(void)
     for (k = 0; k < DBX_NLANE; k++)
         lane[k].mute = 0;                               /* (the mutes are the project's: all back) */
     dbx_fx_init();                                      /* the kit, the lanes, the effects, the master page, the LFOs, ENV: the project's sound, back to its state 0 */
-    dbx_kit = 0;
+    dbx_kit = (uint8_t)dbx_kit_pos(KIT_CLASSIC);
     dbx_kit_reset = 1;                                  /* (the render starts the lanes over) */
     dbx_lfo.p[0][LFO_RATE] = 5;
     dbx_lfo.p[1][LFO_RATE] = 3;

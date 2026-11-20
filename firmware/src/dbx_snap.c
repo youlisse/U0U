@@ -111,7 +111,7 @@ static void dbx_snap_default(dbx_snap_t *d)                  /* a sound at its s
     d->mst[1] = 127;
     d->mst[2] = 0;
     d->mst[3] = 0;
-    d->kit = 0;
+    d->kit = KIT_CLASSIC;
     d->fxmaster = 100;
     d->pad[0] = d->pad[1] = 0;
     for (i = 0; i < 2u * LFO_NP; i++)

@@ -23,15 +23,15 @@ static const char *const DBX_NAME[DBX_NLANE] = {"KICK", "SNARE", "CLAP", "HAT CL
  * the lane of that name takes it, and the lane it leaves keeps Felucca's own drum. */
 enum { KIT_CLASSIC = 0, KIT_TIGHT = 7, KIT_BREAK = 9, KIT_808 = 10, KIT_FM = 11 };
 #define DBX_NKIT 4u
-static const uint8_t DBX_KIT_ID[DBX_NKIT] = {KIT_CLASSIC, KIT_TIGHT, KIT_808, KIT_FM};
-static const char *const DBX_KIT_NAME[DBX_NKIT] = {"CLASSIC", "TIGHT", "808", "FM"};
-static uint32_t dbx_kit_pos(uint32_t id)                 /* the place of a saved id in the list (an id that is not listed: CLASSIC) */
+static const uint8_t DBX_KIT_ID[DBX_NKIT] = {KIT_808, KIT_CLASSIC, KIT_FM, KIT_TIGHT};      /* (the order the KIT knob walks) */
+static const char *const DBX_KIT_NAME[DBX_NKIT] = {"808", "CLASSIC", "FM", "TIGHT"};
+static uint32_t dbx_kit_pos(uint32_t id)                 /* the place of a saved id in the list (an id that is not listed: CLASSIC's place, which is where a fresh start and a reset are too) */
 {
     uint32_t k;
     for (k = 0; k < DBX_NKIT; k++)
         if (DBX_KIT_ID[k] == id)
             return k;
-    return 0;
+    return id == KIT_CLASSIC ? 0u : dbx_kit_pos(KIT_CLASSIC);
 }
 static const uint8_t DBX_SWAP[DV_NKIT] = {0, 4, 1, 0, 2 | 4, 4, 0, 1 | 2};
 
@@ -180,8 +180,8 @@ static void dbx_voices_init(void)
         l->key = l->p;
         l->key.type = 0xFFu;               /* never equal: the first hit sets the lane up */
         dv_init(&l->v, DBX_TYPE[i]);
-        dbx_kit = 0;
-        dbx_kit_run = 0;
+        dbx_kit = (uint8_t)dbx_kit_pos(KIT_CLASSIC);
+        dbx_kit_run = dbx_kit;
         l->vg = dbx_vel_gain(DBX_VEL_DEF);
         l->px = 0x88;
         l->semi = 0;
